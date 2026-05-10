@@ -242,10 +242,13 @@ def _sync_event(
         event_ok_for_cleanup = True
     else:
         try:
+            resolved_dir = ics_output_dir.expanduser().resolve()
+            ics_filename = f"{event.start_time.strftime('%Y-%m-%d_%H%M')}.ics"
             if not dry_run:
-                write_ics_file(event, ics_output_dir)
+                ics_path = write_ics_file(event, ics_output_dir)
+                debug_log(f"email uid={email.uid}: wrote ICS to {ics_path.resolve()}", debug)
             else:
-                debug_log(f"dry-run: would write ICS for {event.event_uid} to {ics_output_dir}", debug)
+                debug_log(f"dry-run: would write ICS to {resolved_dir / ics_filename}", debug)
             result.ics_success.add(event.event_uid)
             event_ok_for_cleanup = True
         except Exception as exc:

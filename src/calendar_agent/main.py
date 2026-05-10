@@ -33,7 +33,7 @@ def main() -> None:
     prompt_for_failure = os.getenv("PROMPT_FOR_FAILURE", "false").lower() in {"1", "true", "yes"}
 
     debug_log(f"mode dry_run={dry_run}", debug)
-    debug_log(f"ics_output_dir={ics_output_dir}", debug)
+    debug_log(f"ics_output_dir={ics_output_dir.expanduser().resolve()}", debug)
     debug_log(f"prompt_for_failure={prompt_for_failure}", debug)
 
     ui = TerminalUI()
