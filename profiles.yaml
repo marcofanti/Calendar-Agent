@@ -4,7 +4,7 @@ profiles:
     subject_pattern: ".*"
     duration_minutes: 20
     # mailbox: "INBOX"             # optional: IMAP folder / Gmail label (default: INBOX)
-    # calendar_name: "Tennis"      # optional: X-WR-CALNAME hint in ICS (Apple Calendar / Outlook)
+    calendar_name: "Calendar (maf5775@eid.utexas.edu)"      # optional: X-WR-CALNAME hint in ICS (Apple Calendar / Outlook)
     # to_pattern: ".*"             # optional: match recipient address
     # body_pattern: ".*"           # optional: match body content
     prompt_template: |
@@ -41,7 +41,7 @@ profiles:
     duration_minutes: 90   # fallback only — end_time is parsed from the email body
     # mailbox: "00 - OldInox"        # optional: IMAP folder / Gmail label (default: INBOX)
     body_max_chars: 500             # booking details are in the first few lines; skip legal boilerplate
-    # calendar_name: "Tennis"       # optional: X-WR-CALNAME hint in ICS (Apple Calendar / Outlook)
+    calendar_name: "Calendar (maf5775@eid.utexas.edu)"       # optional: X-WR-CALNAME hint in ICS (Apple Calendar / Outlook)
     # to_pattern: ".*"              # optional: match recipient address
     # body_pattern: ".*"            # optional: match body content
     prompt_template: |

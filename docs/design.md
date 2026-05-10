@@ -1,7 +1,7 @@
 # Technical Design: Configurable Learning Calendar Agent
 
-**Status:** Draft  
-**Phase:** 1  
+**Status:** Implemented  
+**Phase:** 1 + 2  
 **Date:** 2026-05-10  
 **PRD:** [PRD.md](./PRD.md)
 
@@ -75,9 +75,32 @@ class SourceProfile:
     to_pattern: re.Pattern | None
     body_pattern: re.Pattern | None
     prompt_template: str
+    duration_minutes: int = 30        # fallback duration when LLM omits end_time
+    mailbox: str | None = None        # IMAP folder / Gmail label (default: INBOX)
+    body_max_chars: int | None = None # truncate body before sending to LLM
+    calendar_name: str | None = None  # X-WR-CALNAME written into ICS
 ```
 
-### 2.4 Fallback
+`from_search_term` is a computed property that strips regex escapes from
+`from_pattern.pattern` to get a plain address string for IMAP/Gmail search.
+
+### 2.4 Multi-mailbox search
+
+Profiles are grouped by their `mailbox` value before fetching begins. One IMAP
+`SELECT` is issued per unique folder; all sender addresses for that folder are
+searched together. UIDs are deduplicated in case two profiles share a folder.
+
+```
+mailbox_groups = {folder: [addr1, addr2, ...], ...}
+for mailbox, addrs in mailbox_groups.items():
+    for email in email_client.search_emails(addrs, folder=mailbox):
+        deduplicate by uid
+```
+
+IMAP folder names containing spaces are automatically quoted (e.g.
+`"00 - Tennis"` → `"00 - Tennis"` with IMAP double-quote wrapping).
+
+### 2.5 Fallback
 
 If no profile matches an email, the email is silently skipped (counted in `skipped`, reason:
 `"no matching profile"`). This preserves current behavior for emails not covered by any profile.
@@ -153,6 +176,21 @@ partial state if the process is killed mid-write.
 
 ---
 
+## 3b. Deterministic Fallback
+
+After the LLM call, `parse_email` checks if the LLM returned `is_event=false` but the
+deterministic parser already produced a complete candidate (event type, status, location,
+start time all found via regex). In that case the LLM result is overridden and the
+deterministic candidate is used directly — preventing false correction-loop prompts for
+clear InClubGolf emails that the LLM occasionally rejects.
+
+```
+if llm says is_event=false AND deterministic_candidate is not None:
+    use deterministic_candidate (override LLM)
+```
+
+---
+
 ## 4. Prompt Construction (Updated)
 
 The LLM prompt is now assembled in layers for each email:
@@ -224,9 +262,7 @@ If TTY check fails: log `"PROMPT_FOR_FAILURE=true but no TTY — skipping intera
 
 ### 5.3 Field walkthrough
 
-For each field, display current value (from LLM response or deterministic parse) and prompt
-for override. Empty input = accept current. Validation is applied after each entry.
-
+When no profile is active (InClubGolf mode):
 ```
 event_type [Practice/Lesson] (LLM: "Practice"): 
 status [Reserved/Canceled] (LLM: "Canceled"): 
@@ -235,7 +271,34 @@ time HH:MM AM/PM (LLM: missing): 10:00 AM
 location (LLM: missing): Lake Nona in North Bay
 ```
 
-### 5.4 Prompt change proposal
+When a profile is active (free-form mode — e.g. CourtReserve):
+- `event_type` accepts any non-empty string (not just Practice/Lesson)
+- `location` is optional (empty = no court specified)
+- `end_time` field is shown; if provided, duration is derived rather than using profile default
+
+```
+event_type (LLM: "Singles Live Ball"): 
+status [Reserved/Canceled] (LLM: "Reserved"): 
+date MM/DD/YYYY (LLM: "4/24/2026"): 
+start_time HH:MM AM/PM (LLM: "6:00 PM"): 
+end_time HH:MM AM/PM (LLM: "7:30 PM"): 
+location (optional, LLM: ""): 
+```
+
+### 5.4 Auto-save rule for is_event=false
+
+When the LLM returned `is_event=false` and the operator confirms the email IS a valid event,
+a positive override rule is auto-saved to `prompt_overrides.json` without requiring a second
+operator confirmation:
+
+```
+"Emails with subject '<subject>' ARE valid calendar events (operator confirmed)..."
+```
+
+This ensures that on subsequent runs the LLM receives an explicit operator rule to override
+its default rejection, even when few-shot examples alone are insufficient.
+
+### 5.5 Prompt change proposal
 
 After confirmed fix, a second LLM call is made:
 
@@ -300,10 +363,12 @@ MAX_PROMPT_CHARS=12000
 
 ## 9. Migration
 
-The existing `search_inclubgolf()` method and InClubGolf-specific regexes remain in place.
-`profiles.yaml` is seeded with the InClubGolf profile on first run (auto-generated if missing).
-The parser falls back to the built-in InClubGolf behavior if no profile matches, so existing
-users see zero change until they opt in via `AGENT_PROFILES_FILE`.
+`search_inclubgolf()` on the email client is now an alias for
+`search_emails(["noreply@inclubgolf.com"])` and is backwards-compatible.
+`profiles.yaml` ships with InClubGolf and CourtReserve profiles pre-configured.
+If `profiles.yaml` is absent, the workflow falls back to searching only
+`noreply@inclubgolf.com` — existing behavior is preserved for users who haven't
+opted in to multi-profile mode.
 
 ---
 
@@ -311,15 +376,17 @@ users see zero change until they opt in via `AGENT_PROFILES_FILE`.
 
 | File | Change |
 |------|--------|
-| `src/calendar_agent/profiles.py` | NEW — load, parse, match profiles |
+| `src/calendar_agent/profiles.py` | NEW — load, parse, match profiles; `mailbox`, `body_max_chars`, `calendar_name`, `duration_minutes` fields; `from_search_term` property |
 | `src/calendar_agent/learning/store.py` | NEW — atomic read/write of learned state |
-| `src/calendar_agent/learning/corrector.py` | NEW — HITL correction loop |
+| `src/calendar_agent/learning/corrector.py` | NEW — HITL correction loop; profile-aware (free-form event_type, optional location, end_time); auto-save override for is_event=false |
 | `src/calendar_agent/terminal_ui.py` | NEW — interactive I/O abstraction |
-| `src/calendar_agent/parser.py` | MODIFY — accept profile, inject examples into prompt |
-| `src/calendar_agent/workflow.py` | MODIFY — load profiles, pass to parser, invoke corrector |
-| `src/calendar_agent/main.py` | MODIFY — load PROMPT_FOR_FAILURE, pass TerminalUI |
-| `src/calendar_agent/models.py` | MODIFY — add corrections_saved, prompts_updated to RunResult |
-| `profiles.yaml` | NEW — default profile config (InClubGolf) |
+| `src/calendar_agent/email_client.py` | MODIFY — `search_emails(from_addresses, folder)` multi-address search; `_imap_quote` for space-containing folder names; `move_to_trash(uid, folder)` uses source folder; `MAIL_PROVIDER=yahoo` returns IMAP directly; `_strip_html` preserves block-element newlines; skips multipart/* container parts |
+| `src/calendar_agent/parser.py` | MODIFY — profile-aware prompt (free-form event_type, body truncation, start_time+end_time format); deterministic fallback when LLM returns is_event=false; `source_label` and `calendar_name` on events |
+| `src/calendar_agent/workflow.py` | MODIFY — multi-mailbox grouped search; UID deduplication; `move_to_trash` passes source folder; ICS debug shows resolved path |
+| `src/calendar_agent/main.py` | MODIFY — load PROMPT_FOR_FAILURE, pass TerminalUI; resolved ICS path in debug |
+| `src/calendar_agent/models.py` | MODIFY — `GolfEvent` gains `cancel_url`, `source_label`, `calendar_name`; title omits location when empty |
+| `src/calendar_agent/ics.py` | MODIFY — `X-WR-CALNAME` from `event.calendar_name`; PRODID uses `event.source_label` |
+| `profiles.yaml` | NEW — InClubGolf + CourtReserve built-in profiles with all fields |
 | `.env` | MODIFY — add new keys |
 | `.gitignore` | MODIFY — add .calendar-agent/ |
-| `tests/` | NEW — unit tests for all new modules |
+| `tests/` | NEW/MODIFY — unit tests for all modules; `search_emails` and `move_to_trash` signatures updated |
