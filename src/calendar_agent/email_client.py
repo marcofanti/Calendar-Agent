@@ -129,12 +129,16 @@ class ImapEmailClient:
     def search_inclubgolf(self) -> list[EmailRecord]:
         return self.search_emails(["noreply@inclubgolf.com"])
 
-    def move_to_trash(self, uid: str) -> bool:
+    def move_to_trash(self, uid: str, folder: str | None = None) -> bool:
+        source_folder = folder or self.config.folder
         with self._connect() as mail:
-            mail.select(self.config.folder)
+            mail.select(_imap_quote(source_folder))
             if self.config.trash_folder:
                 status, _ = mail.uid("COPY", uid, self.config.trash_folder)
-                debug_log(f"{self.config.provider}: copy uid={uid} to trash status={status}", self.debug)
+                debug_log(
+                    f"{self.config.provider}: copy uid={uid} from {source_folder!r} to trash status={status}",
+                    self.debug,
+                )
                 if status != "OK":
                     return False
             status, _ = mail.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
@@ -187,10 +191,10 @@ class FallbackEmailClient:
     def search_inclubgolf(self) -> list[EmailRecord]:
         return self.search_emails(["noreply@inclubgolf.com"])
 
-    def move_to_trash(self, uid: str) -> bool:
+    def move_to_trash(self, uid: str, folder: str | None = None) -> bool:
         if self.active_client is None:
             raise RuntimeError("No active email provider; call search_emails before cleanup.")
-        return self.active_client.move_to_trash(uid)
+        return self.active_client.move_to_trash(uid, folder=folder)
 
 
 class GmailApiConfig:
@@ -254,7 +258,7 @@ class GmailApiEmailClient:
     def search_inclubgolf(self) -> list[EmailRecord]:
         return self.search_emails(["noreply@inclubgolf.com"])
 
-    def move_to_trash(self, uid: str) -> bool:
+    def move_to_trash(self, uid: str, folder: str | None = None) -> bool:
         debug_log(f"gmail: moving id={uid} to trash", self.debug)
         self._service().users().messages().trash(userId="me", id=uid).execute()
         return True

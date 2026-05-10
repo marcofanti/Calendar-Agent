@@ -256,7 +256,7 @@ def _sync_event(
     if event_ok_for_cleanup:
         try:
             if not dry_run:
-                if not email_client.move_to_trash(email.uid):
+                if not email_client.move_to_trash(email.uid, folder=email.folder):
                     raise RuntimeError("IMAP move_to_trash returned false")
             else:
                 debug_log(f"dry-run: would move email uid={email.uid} to trash", debug)

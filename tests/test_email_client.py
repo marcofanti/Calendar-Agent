@@ -75,7 +75,7 @@ class _Client:
     def search_inclubgolf(self):
         return self.search_emails(["noreply@inclubgolf.com"])
 
-    def move_to_trash(self, uid):
+    def move_to_trash(self, uid, folder=None):
         self.trashed.append(uid)
         return True
 
