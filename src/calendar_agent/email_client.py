@@ -70,16 +70,17 @@ class ImapEmailClient:
         self.config = config
         self.debug = debug
 
-    def search_emails(self, from_addresses: list[str]) -> list[EmailRecord]:
+    def search_emails(self, from_addresses: list[str], folder: str | None = None) -> list[EmailRecord]:
+        folder = folder or self.config.folder
         debug_log(
-            f"{self.config.provider}: selecting folder {self.config.folder!r} on {self.config.host}",
+            f"{self.config.provider}: selecting folder {folder!r} on {self.config.host}",
             self.debug,
         )
         with self._connect() as mail:
-            status, select_data = mail.select(self.config.folder)
+            status, select_data = mail.select(folder)
             debug_log(f"{self.config.provider}: select status={status} data={select_data}", self.debug)
             if status != "OK":
-                raise RuntimeError(f"IMAP select failed for {self.config.folder}: {status} {select_data}")
+                raise RuntimeError(f"IMAP select failed for {folder}: {status} {select_data}")
 
             seen: set[str] = set()
             ordered_uids: list[str] = []
@@ -119,7 +120,7 @@ class ImapEmailClient:
                         message_id=_message_id(msg, uid),
                         subject=subject,
                         body=_body_from_message(msg),
-                        folder=self.config.folder,
+                        folder=folder,
                         sender=sender,
                     )
                 )
@@ -162,12 +163,12 @@ class FallbackEmailClient:
         self.active_client = None
         self.debug = debug
 
-    def search_emails(self, from_addresses: list[str]) -> list[EmailRecord]:
+    def search_emails(self, from_addresses: list[str], folder: str | None = None) -> list[EmailRecord]:
         errors: list[str] = []
         for client in self.clients:
             try:
                 debug_log(f"trying email provider {client.config.provider}", self.debug)
-                emails = client.search_emails(from_addresses)
+                emails = client.search_emails(from_addresses, folder=folder)
                 self.active_client = client
                 if errors:
                     print("Email fallback used after: " + "; ".join(errors))
@@ -202,9 +203,11 @@ class GmailApiEmailClient:
         self.service = service
         self.debug = debug
 
-    def search_emails(self, from_addresses: list[str]) -> list[EmailRecord]:
+    def search_emails(self, from_addresses: list[str], folder: str | None = None) -> list[EmailRecord]:
         service = self._service()
         q = " OR ".join(f"from:{addr}" for addr in from_addresses)
+        if folder:
+            q = f"in:{folder} ({q})"
         debug_log(f"gmail: searching Gmail API for {q}", self.debug)
         messages = []
         page_token = None

@@ -26,6 +26,7 @@ class SourceProfile:
     body_pattern: re.Pattern | None
     prompt_template: str
     duration_minutes: int = DEFAULT_DURATION_MINUTES
+    mailbox: str | None = None  # IMAP folder / Gmail label; None → provider default (INBOX)
 
     @property
     def from_search_term(self) -> str:
@@ -142,6 +143,10 @@ def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
     if not isinstance(raw_duration, int) or raw_duration <= 0:
         raise ProfileConfigError(f"{path}: profile '{name}'.duration_minutes must be a positive integer")
 
+    mailbox = raw.get("mailbox")
+    if mailbox is not None and not isinstance(mailbox, str):
+        raise ProfileConfigError(f"{path}: profile '{name}'.mailbox must be a string")
+
     return SourceProfile(
         name=name,
         from_pattern=from_pat,
@@ -150,6 +155,7 @@ def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
         body_pattern=body_pat,
         prompt_template=prompt_template.strip(),
         duration_minutes=raw_duration,
+        mailbox=mailbox or None,
     )
 
 

@@ -37,9 +37,25 @@ def run_sync(
             debug_log(f"profile load failed: {exception_summary(exc)}", debug)
             profiles = []
 
-    from_addresses = [p.from_search_term for p in profiles] if profiles else ["noreply@inclubgolf.com"]
-    debug_log(f"searching mailbox for emails from: {', '.join(from_addresses)}", debug)
-    emails = email_client.search_emails(from_addresses)
+    # Group profiles by mailbox so we do one IMAP SELECT per unique folder.
+    from collections import defaultdict
+    mailbox_groups: dict[str | None, list[str]] = defaultdict(list)
+    if profiles:
+        for p in profiles:
+            mailbox_groups[p.mailbox].append(p.from_search_term)
+    else:
+        mailbox_groups[None].append("noreply@inclubgolf.com")
+
+    seen_uids: set[str] = set()
+    emails: list[EmailRecord] = []
+    for mailbox, addrs in mailbox_groups.items():
+        folder_label = f"folder={mailbox!r}" if mailbox else "default folder"
+        debug_log(f"searching {folder_label} for: {', '.join(addrs)}", debug)
+        for e in email_client.search_emails(addrs, folder=mailbox):
+            if e.uid not in seen_uids:
+                seen_uids.add(e.uid)
+                emails.append(e)
+
     result.emails_found = len(emails)
     debug_log(f"mailbox search returned {len(emails)} email(s)", debug)
 

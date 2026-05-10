@@ -3,6 +3,7 @@ profiles:
     from_pattern: "noreply@inclubgolf\\.com"
     subject_pattern: ".*"
     duration_minutes: 20
+    # mailbox: "INBOX"       # optional: IMAP folder / Gmail label (default: INBOX)
     # to_pattern: ".*"       # optional: match recipient address
     # body_pattern: ".*"     # optional: match body content
     prompt_template: |
@@ -37,6 +38,7 @@ profiles:
     from_pattern: "notifications_at_courtreserve_com_2r6q26xw5k3936_566ad789@icloud\\.com"
     subject_pattern: ".*"
     duration_minutes: 90   # fallback only — end_time is parsed from the email body
+    # mailbox: "INBOX"       # optional: IMAP folder / Gmail label (default: INBOX)
     # to_pattern: ".*"       # optional: match recipient address
     # body_pattern: ".*"     # optional: match body content
     prompt_template: |

@@ -295,7 +295,7 @@ class _FailEmailClient:
     def __init__(self):
         self.trashed = []
 
-    def search_emails(self, from_addresses):
+    def search_emails(self, from_addresses, folder=None):
         return [EmailRecord(
             uid="555",
             message_id="msg-555",

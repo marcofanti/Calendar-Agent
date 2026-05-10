@@ -67,7 +67,7 @@ class _Client:
         self.search_error = search_error
         self.trashed = []
 
-    def search_emails(self, from_addresses):
+    def search_emails(self, from_addresses, folder=None):
         if self.search_error:
             raise self.search_error
         return self.emails
