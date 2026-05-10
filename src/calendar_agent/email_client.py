@@ -269,8 +269,8 @@ def build_email_client_from_env(debug: bool = False) -> ImapEmailClient | GmailA
     if provider == "gmail":
         return GmailApiEmailClient(debug=debug)
     if provider == "yahoo":
-        clients = _configured_clients(["yahoo", "gmail"], debug=debug)
-        return FallbackEmailClient(clients, debug=debug)
+        config = ImapConfig.for_provider("yahoo", allow_legacy=True)
+        return ImapEmailClient(config, debug=debug)
     if provider == "auto":
         clients = _configured_clients(["yahoo", "gmail"], debug=debug)
         return FallbackEmailClient(clients, debug=debug)

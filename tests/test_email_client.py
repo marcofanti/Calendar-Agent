@@ -1,7 +1,7 @@
 import base64
 from email.message import EmailMessage
 
-from calendar_agent.email_client import FallbackEmailClient, GmailApiEmailClient, build_email_client_from_env
+from calendar_agent.email_client import FallbackEmailClient, GmailApiEmailClient, ImapEmailClient, build_email_client_from_env
 from calendar_agent.models import EmailRecord
 
 
@@ -20,6 +20,17 @@ def test_fallback_uses_gmail_when_yahoo_search_fails():
     assert moved is True
     assert yahoo.trashed == []
     assert gmail.trashed == ["22"]
+
+
+def test_build_email_client_yahoo_explicit_returns_imap_only(monkeypatch):
+    monkeypatch.setenv("MAIL_PROVIDER", "yahoo")
+    monkeypatch.setenv("YAHOO_IMAP_USER", "user@yahoo.com")
+    monkeypatch.setenv("YAHOO_IMAP_PASSWORD", "secret")
+
+    client = build_email_client_from_env()
+
+    assert isinstance(client, ImapEmailClient)
+    assert client.config.provider == "yahoo"
 
 
 def test_build_email_client_skips_missing_yahoo_and_uses_gmail(monkeypatch):
