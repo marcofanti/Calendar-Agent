@@ -64,12 +64,13 @@ def run_correction_loop(
     from calendar_agent.profiles import DEFAULT_DURATION_MINUTES
     duration = profile.duration_minutes if profile is not None else DEFAULT_DURATION_MINUTES
     source_label = profile.name.capitalize() if profile is not None else "InClubGolf"
+    calendar_name = profile.calendar_name if profile is not None else None
 
     correction = _collect_fields(attempt.trace, ui, profile=profile)
     if correction is None:
         return CorrectionResult(outcome="skipped")
 
-    event = _build_event_from_correction(email, correction, duration_minutes=duration, source_label=source_label)
+    event = _build_event_from_correction(email, correction, duration_minutes=duration, source_label=source_label, calendar_name=calendar_name)
 
     while True:
         if not ui.ask_run_sync():
@@ -82,7 +83,7 @@ def run_correction_loop(
         correction = _collect_fields(attempt.trace, ui, defaults=correction, profile=profile)
         if correction is None:
             return CorrectionResult(outcome="skipped")
-        event = _build_event_from_correction(email, correction, duration_minutes=duration, source_label=source_label)
+        event = _build_event_from_correction(email, correction, duration_minutes=duration, source_label=source_label, calendar_name=calendar_name)
 
     correction_saved = False
     prompt_updated = False
@@ -209,6 +210,7 @@ def _build_event_from_correction(
     correction: dict,
     duration_minutes: int = 30,
     source_label: str = "InClubGolf",
+    calendar_name: str | None = None,
 ) -> GolfEvent:
     event_type = correction["event_type"]
     status = correction["status"]
@@ -249,6 +251,7 @@ def _build_event_from_correction(
         start_time=start_time,
         end_time=end_time,
         source_label=source_label,
+        calendar_name=calendar_name,
     )
 
 

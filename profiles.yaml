@@ -3,9 +3,10 @@ profiles:
     from_pattern: "noreply@inclubgolf\\.com"
     subject_pattern: ".*"
     duration_minutes: 20
-    # mailbox: "INBOX"       # optional: IMAP folder / Gmail label (default: INBOX)
-    # to_pattern: ".*"       # optional: match recipient address
-    # body_pattern: ".*"     # optional: match body content
+    # mailbox: "INBOX"             # optional: IMAP folder / Gmail label (default: INBOX)
+    # calendar_name: "Tennis"      # optional: X-WR-CALNAME hint in ICS (Apple Calendar / Outlook)
+    # to_pattern: ".*"             # optional: match recipient address
+    # body_pattern: ".*"           # optional: match body content
     prompt_template: |
       Extract and validate one InClubGolf calendar event from this email.
 
@@ -38,10 +39,11 @@ profiles:
     from_pattern: "notifications_at_courtreserve_com_2r6q26xw5k3936_566ad789@icloud\\.com"
     subject_pattern: ".*"
     duration_minutes: 90   # fallback only — end_time is parsed from the email body
-    mailbox: "00 - OldInox"       # optional: IMAP folder / Gmail label (default: INBOX)
-    body_max_chars: 500    # booking details are in the first few lines; skip legal boilerplate
-    # to_pattern: ".*"       # optional: match recipient address
-    # body_pattern: ".*"     # optional: match body content
+    # mailbox: "00 - OldInox"        # optional: IMAP folder / Gmail label (default: INBOX)
+    body_max_chars: 500             # booking details are in the first few lines; skip legal boilerplate
+    # calendar_name: "Tennis"       # optional: X-WR-CALNAME hint in ICS (Apple Calendar / Outlook)
+    # to_pattern: ".*"              # optional: match recipient address
+    # body_pattern: ".*"            # optional: match body content
     prompt_template: |
       Extract and validate one CourtReserve event registration from this email.
 

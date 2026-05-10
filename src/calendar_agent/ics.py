@@ -21,8 +21,12 @@ def build_ics(event: GolfEvent) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//CalendarAgent//InClubGolf//EN",
+        f"PRODID:-//CalendarAgent//{event.source_label}//EN",
         f"METHOD:{method}",
+    ]
+    if event.calendar_name:
+        lines.append(f"X-WR-CALNAME:{_escape(event.calendar_name)}")
+    lines += [
         "BEGIN:VEVENT",
         f"UID:{_escape(event.event_uid)}",
         f"DTSTAMP:{_utc_stamp(event.start_time)}",

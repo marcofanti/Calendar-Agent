@@ -96,6 +96,7 @@ def parse_email(
     cancel_url = _extract_cancel_url(text)
     event_uid = make_event_uid(event_type, location, start_time)
     source_label = profile.name.capitalize() if profile is not None else "InClubGolf"
+    calendar_name = profile.calendar_name if profile is not None else None
     description = _build_description(event_type, status, location, start_time, cancel_url, duration, source_label)
 
     event = GolfEvent(
@@ -110,6 +111,7 @@ def parse_email(
         end_time=end_time,
         cancel_url=cancel_url,
         source_label=source_label,
+        calendar_name=calendar_name,
     )
     return ParseAttempt(event=event, trace=trace)
 

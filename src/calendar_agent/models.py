@@ -33,6 +33,7 @@ class GolfEvent:
     end_time: datetime
     cancel_url: str | None = None
     source_label: str = "InClubGolf"
+    calendar_name: str | None = None  # X-WR-CALNAME hint for ICS imports
 
     @property
     def is_canceled(self) -> bool:

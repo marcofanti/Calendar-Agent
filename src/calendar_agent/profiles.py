@@ -28,6 +28,7 @@ class SourceProfile:
     duration_minutes: int = DEFAULT_DURATION_MINUTES
     mailbox: str | None = None  # IMAP folder / Gmail label; None → provider default (INBOX)
     body_max_chars: int | None = None  # truncate body before sending to LLM; None → no limit
+    calendar_name: str | None = None  # X-WR-CALNAME hint in ICS exports; None → no hint
 
     @property
     def from_search_term(self) -> str:
@@ -152,6 +153,10 @@ def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
     if raw_body_max is not None and (not isinstance(raw_body_max, int) or raw_body_max <= 0):
         raise ProfileConfigError(f"{path}: profile '{name}'.body_max_chars must be a positive integer")
 
+    calendar_name = raw.get("calendar_name")
+    if calendar_name is not None and not isinstance(calendar_name, str):
+        raise ProfileConfigError(f"{path}: profile '{name}'.calendar_name must be a string")
+
     return SourceProfile(
         name=name,
         from_pattern=from_pat,
@@ -162,6 +167,7 @@ def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
         duration_minutes=raw_duration,
         mailbox=mailbox or None,
         body_max_chars=raw_body_max,
+        calendar_name=calendar_name or None,
     )
 
 
