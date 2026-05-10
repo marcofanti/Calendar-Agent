@@ -63,12 +63,13 @@ def run_correction_loop(
     # answer == "yes" — walk through fields
     from calendar_agent.profiles import DEFAULT_DURATION_MINUTES
     duration = profile.duration_minutes if profile is not None else DEFAULT_DURATION_MINUTES
+    source_label = profile.name.capitalize() if profile is not None else "InClubGolf"
 
-    correction = _collect_fields(attempt.trace, ui)
+    correction = _collect_fields(attempt.trace, ui, profile=profile)
     if correction is None:
         return CorrectionResult(outcome="skipped")
 
-    event = _build_event_from_correction(email, correction, duration_minutes=duration)
+    event = _build_event_from_correction(email, correction, duration_minutes=duration, source_label=source_label)
 
     while True:
         if not ui.ask_run_sync():
@@ -78,10 +79,10 @@ def run_correction_loop(
         if success:
             break
         ui.info("Sync failed. You can edit fields and retry, or skip.")
-        correction = _collect_fields(attempt.trace, ui, defaults=correction)
+        correction = _collect_fields(attempt.trace, ui, defaults=correction, profile=profile)
         if correction is None:
             return CorrectionResult(outcome="skipped")
-        event = _build_event_from_correction(email, correction, duration_minutes=duration)
+        event = _build_event_from_correction(email, correction, duration_minutes=duration, source_label=source_label)
 
     correction_saved = False
     prompt_updated = False
@@ -112,27 +113,32 @@ def _collect_fields(
     trace: ParseTrace,
     ui: TerminalUI,
     defaults: dict | None = None,
+    profile: "SourceProfile | None" = None,
 ) -> dict | None:
     llm = trace.llm_response or {}
     det = trace.deterministic_candidate or {}
     prior = defaults or {}
+    free_form_type = profile is not None  # profiles allow any event_type string
 
     def _default(key: str) -> str:
         return prior.get(key) or llm.get(key) or det.get(key) or ""
 
     ui.info("\nEnter corrected fields (press Enter to keep current value):")
 
+    event_type_hint = None if free_form_type else ["Practice", "Lesson"]
+
     while True:
-        event_type = ui.ask_field("event_type", _default("event_type"), ["Practice", "Lesson"])
+        event_type = ui.ask_field("event_type", _default("event_type"), event_type_hint)
         status = ui.ask_field("status", _default("status"), ["Reserved", "Canceled"])
         location = ui.ask_field("location", _default("location"))
         date = ui.ask_field("date (MM/DD/YYYY)", _default("date"))
         time_ = ui.ask_field("time (HH:MM AM/PM)", _default("time"))
 
-        errors = _validate_fields(event_type, status, location, date, time_)
+        errors = _validate_fields(event_type, status, location, date, time_, free_form_type=free_form_type)
         if not errors:
+            norm_type = event_type.strip() if free_form_type else _norm_event_type(event_type)
             return {
-                "event_type": _norm_event_type(event_type),
+                "event_type": norm_type,
                 "status": _norm_status(status),
                 "location": location.strip(),
                 "date": date.strip(),
@@ -144,14 +150,19 @@ def _collect_fields(
 
 
 def _validate_fields(
-    event_type: str, status: str, location: str, date: str, time_: str
+    event_type: str, status: str, location: str, date: str, time_: str,
+    free_form_type: bool = False,
 ) -> list[str]:
     errors = []
-    if _norm_event_type(event_type) is None:
+    if free_form_type:
+        if not event_type.strip():
+            errors.append("event_type is required")
+    elif _norm_event_type(event_type) is None:
         errors.append("event_type must be Practice or Lesson")
     if _norm_status(status) is None:
         errors.append("status must be Reserved or Canceled")
-    if not location.strip():
+    # location is optional for profiles (CourtReserve often has no court name)
+    if not free_form_type and not location.strip():
         errors.append("location is required")
     try:
         datetime.strptime(f"{date.strip()} {time_.strip()}", "%m/%d/%Y %I:%M %p")
@@ -164,6 +175,7 @@ def _build_event_from_correction(
     email: EmailRecord,
     correction: dict,
     duration_minutes: int = 30,
+    source_label: str = "InClubGolf",
 ) -> GolfEvent:
     event_type = correction["event_type"]
     status = correction["status"]
@@ -176,13 +188,15 @@ def _build_event_from_correction(
     event_uid = make_event_uid(event_type, location, start_time)
     action = "canceled" if status == "Canceled" else "reserved"
     formatted = start_time.strftime("%A, %B %-d, %Y at %-I:%M %p %Z")
-    description = "\n".join([
-        f"InClubGolf {event_type.lower()} {action}.",
-        f"Location: {location}",
+    lines = [
+        f"{source_label} {event_type.lower()} {action}.",
         f"Time: {formatted}",
         f"Duration: {duration_minutes} minutes",
         "Created from interactive correction.",
-    ])
+    ]
+    if location:
+        lines.insert(1, f"Location: {location}")
+    description = "\n".join(lines)
     return GolfEvent(
         source_uid=email.uid,
         source_message_id=email.message_id,
