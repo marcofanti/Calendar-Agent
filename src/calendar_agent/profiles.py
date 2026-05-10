@@ -27,6 +27,11 @@ class SourceProfile:
     prompt_template: str
     duration_minutes: int = DEFAULT_DURATION_MINUTES
 
+    @property
+    def from_search_term(self) -> str:
+        """Plain-text FROM address for IMAP/Gmail search (unescapes regex backslashes)."""
+        return re.sub(r"\\(.)", r"\1", self.from_pattern.pattern)
+
 
 def load_profiles(path: Path) -> list[SourceProfile]:
     try:

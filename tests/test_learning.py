@@ -295,7 +295,7 @@ class _FailEmailClient:
     def __init__(self):
         self.trashed = []
 
-    def search_inclubgolf(self):
+    def search_emails(self, from_addresses):
         return [EmailRecord(
             uid="555",
             message_id="msg-555",
@@ -303,6 +303,9 @@ class _FailEmailClient:
             body="Your practice was canceled.",
             sender="noreply@inclubgolf.com",
         )]
+
+    def search_inclubgolf(self):
+        return self.search_emails(["noreply@inclubgolf.com"])
 
     def move_to_trash(self, uid):
         self.trashed.append(uid)

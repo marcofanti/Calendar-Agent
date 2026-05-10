@@ -56,10 +56,13 @@ class _Client:
         self.search_error = search_error
         self.trashed = []
 
-    def search_inclubgolf(self):
+    def search_emails(self, from_addresses):
         if self.search_error:
             raise self.search_error
         return self.emails
+
+    def search_inclubgolf(self):
+        return self.search_emails(["noreply@inclubgolf.com"])
 
     def move_to_trash(self, uid):
         self.trashed.append(uid)

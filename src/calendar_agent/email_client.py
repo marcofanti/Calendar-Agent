@@ -70,7 +70,7 @@ class ImapEmailClient:
         self.config = config
         self.debug = debug
 
-    def search_inclubgolf(self) -> list[EmailRecord]:
+    def search_emails(self, from_addresses: list[str]) -> list[EmailRecord]:
         debug_log(
             f"{self.config.provider}: selecting folder {self.config.folder!r} on {self.config.host}",
             self.debug,
@@ -81,16 +81,28 @@ class ImapEmailClient:
             if status != "OK":
                 raise RuntimeError(f"IMAP select failed for {self.config.folder}: {status} {select_data}")
 
-            status, data = mail.uid("search", None, '(FROM "noreply@inclubgolf.com")')
-            debug_log(f"{self.config.provider}: search status={status} raw={data}", self.debug)
-            if status != "OK":
-                raise RuntimeError(f"IMAP search failed: {status}")
+            seen: set[str] = set()
+            ordered_uids: list[str] = []
+            for addr in from_addresses:
+                status, data = mail.uid("search", None, f'(FROM "{addr}")')
+                debug_log(
+                    f"{self.config.provider}: search from={addr!r} status={status} raw={data}",
+                    self.debug,
+                )
+                if status != "OK":
+                    raise RuntimeError(f"IMAP search failed: {status}")
+                for uid_bytes in (data[0].split() if data and data[0] else []):
+                    uid = uid_bytes.decode("ascii")
+                    if uid not in seen:
+                        seen.add(uid)
+                        ordered_uids.append(uid)
 
+            debug_log(
+                f"{self.config.provider}: found {len(ordered_uids)} candidate message(s) across {len(from_addresses)} address(es)",
+                self.debug,
+            )
             emails: list[EmailRecord] = []
-            uids = data[0].split() if data and data[0] else []
-            debug_log(f"{self.config.provider}: found {len(uids)} candidate message(s)", self.debug)
-            for uid_bytes in uids:
-                uid = uid_bytes.decode("ascii")
+            for uid in ordered_uids:
                 status, fetched = mail.uid("fetch", uid, "(RFC822)")
                 debug_log(f"{self.config.provider}: fetch uid={uid} status={status}", self.debug)
                 if status != "OK" or not fetched or not isinstance(fetched[0], tuple):
@@ -99,7 +111,8 @@ class ImapEmailClient:
 
                 msg = email.message_from_bytes(fetched[0][1], policy=policy.default)
                 subject = _decode_subject(msg.get("Subject", ""))
-                debug_log(f"{self.config.provider}: fetched uid={uid} subject={subject!r}", self.debug)
+                sender = str(msg.get("From", ""))
+                debug_log(f"{self.config.provider}: fetched uid={uid} subject={subject!r} sender={sender!r}", self.debug)
                 emails.append(
                     EmailRecord(
                         uid=uid,
@@ -107,9 +120,13 @@ class ImapEmailClient:
                         subject=subject,
                         body=_body_from_message(msg),
                         folder=self.config.folder,
+                        sender=sender,
                     )
                 )
             return emails
+
+    def search_inclubgolf(self) -> list[EmailRecord]:
+        return self.search_emails(["noreply@inclubgolf.com"])
 
     def move_to_trash(self, uid: str) -> bool:
         with self._connect() as mail:
@@ -145,16 +162,19 @@ class FallbackEmailClient:
         self.active_client = None
         self.debug = debug
 
-    def search_inclubgolf(self) -> list[EmailRecord]:
+    def search_emails(self, from_addresses: list[str]) -> list[EmailRecord]:
         errors: list[str] = []
         for client in self.clients:
             try:
                 debug_log(f"trying email provider {client.config.provider}", self.debug)
-                emails = client.search_inclubgolf()
+                emails = client.search_emails(from_addresses)
                 self.active_client = client
                 if errors:
                     print("Email fallback used after: " + "; ".join(errors))
-                print(f"Reading InClubGolf email from {client.config.provider}.")
+                addr_summary = ", ".join(from_addresses[:3])
+                if len(from_addresses) > 3:
+                    addr_summary += f" (+{len(from_addresses) - 3} more)"
+                print(f"Reading email from {client.config.provider} ({addr_summary}).")
                 return emails
             except Exception as exc:
                 summary = exception_summary(exc)
@@ -163,9 +183,12 @@ class FallbackEmailClient:
 
         raise RuntimeError("All configured email providers failed: " + "; ".join(errors))
 
+    def search_inclubgolf(self) -> list[EmailRecord]:
+        return self.search_emails(["noreply@inclubgolf.com"])
+
     def move_to_trash(self, uid: str) -> bool:
         if self.active_client is None:
-            raise RuntimeError("No active email provider; search_inclubgolf must run before cleanup.")
+            raise RuntimeError("No active email provider; call search_emails before cleanup.")
         return self.active_client.move_to_trash(uid)
 
 
@@ -179,15 +202,16 @@ class GmailApiEmailClient:
         self.service = service
         self.debug = debug
 
-    def search_inclubgolf(self) -> list[EmailRecord]:
+    def search_emails(self, from_addresses: list[str]) -> list[EmailRecord]:
         service = self._service()
-        debug_log("gmail: searching Gmail API for from:noreply@inclubgolf.com", self.debug)
+        q = " OR ".join(f"from:{addr}" for addr in from_addresses)
+        debug_log(f"gmail: searching Gmail API for {q}", self.debug)
         messages = []
         page_token = None
         while True:
             request = service.users().messages().list(
                 userId="me",
-                q="from:noreply@inclubgolf.com",
+                q=q,
                 includeSpamTrash=False,
                 pageToken=page_token,
             )
@@ -210,6 +234,7 @@ class GmailApiEmailClient:
             raw = _decode_gmail_raw(raw_message["raw"])
             msg = email.message_from_bytes(raw, policy=policy.default)
             subject = _decode_subject(msg.get("Subject", ""))
+            sender = str(msg.get("From", ""))
             debug_log(f"gmail: fetched id={message_id} subject={subject!r}", self.debug)
             emails.append(
                 EmailRecord(
@@ -218,9 +243,13 @@ class GmailApiEmailClient:
                     subject=subject,
                     body=_body_from_message(msg),
                     folder="gmail",
+                    sender=sender,
                 )
             )
         return emails
+
+    def search_inclubgolf(self) -> list[EmailRecord]:
+        return self.search_emails(["noreply@inclubgolf.com"])
 
     def move_to_trash(self, uid: str) -> bool:
         debug_log(f"gmail: moving id={uid} to trash", self.debug)

@@ -95,7 +95,7 @@ class _EmailClient:
     def __init__(self):
         self.trashed = []
 
-    def search_inclubgolf(self):
+    def search_emails(self, from_addresses):
         return [
             EmailRecord(
                 uid="101",
@@ -108,13 +108,16 @@ class _EmailClient:
             )
         ]
 
+    def search_inclubgolf(self):
+        return self.search_emails(["noreply@inclubgolf.com"])
+
     def move_to_trash(self, uid):
         self.trashed.append(uid)
         return True
 
 
 class _TwoEmailClient(_EmailClient):
-    def search_inclubgolf(self):
+    def search_emails(self, from_addresses):
         return [
             EmailRecord(
                 uid="101",

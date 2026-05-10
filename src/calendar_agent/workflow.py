@@ -28,10 +28,6 @@ def run_sync(
     ui=None,  # TerminalUI | None — avoid circular import at module level
 ) -> RunResult:
     result = RunResult()
-    debug_log("searching mailbox for InClubGolf emails", debug)
-    emails = email_client.search_inclubgolf()
-    result.emails_found = len(emails)
-    debug_log(f"mailbox search returned {len(emails)} email(s)", debug)
     llm_client = llm_client if llm_client is not None else llm_from_env()
 
     if profiles is None:
@@ -40,6 +36,12 @@ def run_sync(
         except Exception as exc:
             debug_log(f"profile load failed: {exception_summary(exc)}", debug)
             profiles = []
+
+    from_addresses = [p.from_search_term for p in profiles] if profiles else ["noreply@inclubgolf.com"]
+    debug_log(f"searching mailbox for emails from: {', '.join(from_addresses)}", debug)
+    emails = email_client.search_emails(from_addresses)
+    result.emails_found = len(emails)
+    debug_log(f"mailbox search returned {len(emails)} email(s)", debug)
 
     learning_dir = Path(os.getenv("AGENT_LEARNING_DIR", ".calendar-agent/learned"))
     max_prompt_chars = int(os.getenv("MAX_PROMPT_CHARS", "12000"))
