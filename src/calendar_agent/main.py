@@ -25,6 +25,7 @@ def main() -> None:
     args = parser.parse_args()
 
     load_dotenv()
+    load_dotenv(".env.local", override=True)
     dry_run = args.dry_run or os.getenv("DRY_RUN", "false").lower() in {"1", "true", "yes"}
     debug = args.debug or debug_enabled()
     ics_output_dir = Path(os.getenv("ICS_OUTPUT_DIR", "~/Downloads/inclubgolf"))

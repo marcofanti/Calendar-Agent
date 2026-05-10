@@ -16,6 +16,8 @@ class EmailRecord:
     subject: str
     body: str
     folder: str = "INBOX"
+    sender: str = ""
+    recipient: str = ""
 
 
 @dataclass(slots=True)
@@ -53,6 +55,8 @@ class RunResult:
     trashed_uids: set[str] = field(default_factory=set)
     skipped: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    corrections_saved: int = 0
+    prompts_updated: int = 0
 
     @property
     def not_parsed_count(self) -> int:

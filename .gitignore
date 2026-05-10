@@ -1,4 +1,5 @@
 .env
+.env.local
 .venv/
 __pycache__/
 .pytest_cache/
@@ -8,3 +9,4 @@ ics/
 token.json
 o365_token.txt
 *.json
+.calendar-agent/

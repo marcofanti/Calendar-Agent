@@ -72,7 +72,7 @@ def test_parse_failure_records_exception_type(tmp_path):
         llm_client=_FailingLlmClient(),
     )
 
-    assert result.errors == ["101: LLM parse failed: RuntimeError: ollama unavailable"]
+    assert result.errors == ["101: LLM call failed: RuntimeError: ollama unavailable"]
 
 
 def test_not_parsed_count_reconciles_found_and_parsed(tmp_path):

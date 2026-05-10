@@ -3,12 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from calendar_agent.debug import debug_log, exception_summary
 from calendar_agent.llm import LlmClient, llm_from_env
 from calendar_agent.models import EmailRecord, GolfEvent
+
+if TYPE_CHECKING:
+    from calendar_agent.profiles import SourceProfile
 
 
 EASTERN = ZoneInfo("America/New_York")
@@ -31,12 +36,31 @@ SUBJECT_LOCATION_RE = re.compile(
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
-def parse_inclubgolf_email(
+@dataclass(slots=True)
+class ParseTrace:
+    uid: str
+    subject: str
+    body: str
+    body_preview: str
+    deterministic_candidate: dict | None
+    prompt: str
+    llm_response: dict | None = None
+    failure_reason: str | None = None
+
+
+@dataclass(slots=True)
+class ParseAttempt:
+    event: GolfEvent | None
+    trace: ParseTrace
+
+
+def parse_email(
     email: EmailRecord,
     llm_client: LlmClient | None = None,
     debug: bool = False,
-) -> GolfEvent | None:
-    text = _normalize_text(f"{email.subject}\n{email.body}")
+    profile: SourceProfile | None = None,
+    prompt_context: str = "",
+) -> ParseAttempt:
     deterministic_candidate = _parse_deterministically(email.subject, email.body)
     debug_log(
         f"parser uid={email.uid}: subject={email.subject!r} body_preview={_preview(email.body)!r}",
@@ -46,15 +70,18 @@ def parse_inclubgolf_email(
         f"parser uid={email.uid}: deterministic_candidate={_candidate_for_prompt(deterministic_candidate)}",
         debug,
     )
-    parsed = _parse_with_llm(
+    parsed, trace = _parse_with_llm(
         email=email,
         deterministic_candidate=deterministic_candidate,
         llm_client=llm_client if llm_client is not None else llm_from_env(),
         debug=debug,
+        profile=profile,
+        prompt_context=prompt_context,
     )
     if parsed is None:
-        return None
+        return ParseAttempt(event=None, trace=trace)
 
+    text = _normalize_text(f"{email.subject}\n{email.body}")
     event_type = parsed["event_type"]
     status = parsed["status"]
     location = _normalize_location(parsed["location"])
@@ -64,7 +91,7 @@ def parse_inclubgolf_email(
     event_uid = make_event_uid(event_type, location, start_time)
     description = _build_description(event_type, status, location, start_time, cancel_url)
 
-    return GolfEvent(
+    event = GolfEvent(
         source_uid=email.uid,
         source_message_id=email.message_id,
         event_uid=event_uid,
@@ -76,6 +103,16 @@ def parse_inclubgolf_email(
         end_time=end_time,
         cancel_url=cancel_url,
     )
+    return ParseAttempt(event=event, trace=trace)
+
+
+# Backwards-compatible alias used by existing tests
+def parse_inclubgolf_email(
+    email: EmailRecord,
+    llm_client: LlmClient | None = None,
+    debug: bool = False,
+) -> GolfEvent | None:
+    return parse_email(email=email, llm_client=llm_client, debug=debug).event
 
 
 def make_event_uid(event_type: str, location: str, start_time: datetime) -> str:
@@ -132,31 +169,54 @@ def _parse_with_llm(
     deterministic_candidate: dict | None,
     llm_client: LlmClient,
     debug: bool = False,
-) -> dict | None:
-    prompt = _build_llm_prompt(email, deterministic_candidate)
+    profile: SourceProfile | None = None,
+    prompt_context: str = "",
+) -> tuple[dict | None, ParseTrace]:
+    prompt = _build_llm_prompt(
+        email, deterministic_candidate, profile=profile, prompt_context=prompt_context
+    )
+    trace = ParseTrace(
+        uid=email.uid,
+        subject=email.subject,
+        body=email.body,
+        body_preview=_preview(email.body),
+        deterministic_candidate=_candidate_for_prompt(deterministic_candidate),
+        prompt=prompt,
+    )
     debug_log(
-        f"parser uid={email.uid}: sending LLM prompt with subject/body and candidate; prompt_chars={len(prompt)}",
+        f"parser uid={email.uid}: sending LLM prompt; prompt_chars={len(prompt)}",
         debug,
     )
-    data = llm_client.extract_event_json(prompt)
+    try:
+        data = llm_client.extract_event_json(prompt)
+    except Exception as exc:
+        trace.failure_reason = f"LLM call failed: {exception_summary(exc)}"
+        debug_log(f"parser uid={email.uid}: {trace.failure_reason}", debug)
+        return None, trace
+
+    trace.llm_response = data
     debug_log(f"parser uid={email.uid}: llm_response={data}", debug)
+
     if data.get("is_event") is False:
+        trace.failure_reason = "LLM returned is_event=false"
         debug_log(f"parser uid={email.uid}: rejected because is_event=false", debug)
-        return None
+        return None, trace
 
     event_type = _valid_event_type(data.get("event_type"))
     status = _valid_status(data.get("status"))
     if event_type is None or status is None:
-        debug_log(
-            f"parser uid={email.uid}: invalid event_type/status event_type={data.get('event_type')!r} status={data.get('status')!r}",
-            debug,
+        trace.failure_reason = (
+            f"Invalid event_type/status: event_type={data.get('event_type')!r} "
+            f"status={data.get('status')!r}"
         )
-        return None
+        debug_log(f"parser uid={email.uid}: {trace.failure_reason}", debug)
+        return None, trace
 
-    missing = [field for field in ("location", "date", "time") if not data.get(field)]
+    missing = [f for f in ("location", "date", "time") if not data.get(f)]
     if missing:
-        debug_log(f"parser uid={email.uid}: missing required field(s): {', '.join(missing)}", debug)
-        return None
+        trace.failure_reason = f"Missing required field(s): {', '.join(missing)}"
+        debug_log(f"parser uid={email.uid}: {trace.failure_reason}", debug)
+        return None, trace
 
     try:
         start_time = datetime.strptime(
@@ -164,50 +224,39 @@ def _parse_with_llm(
             "%m/%d/%Y %I:%M %p",
         ).replace(tzinfo=EASTERN)
     except Exception as exc:
-        debug_log(
-            f"parser uid={email.uid}: invalid date/time date={data.get('date')!r} time={data.get('time')!r}: {exception_summary(exc)}",
-            debug,
+        trace.failure_reason = (
+            f"Invalid date/time date={data.get('date')!r} time={data.get('time')!r}: "
+            f"{exception_summary(exc)}"
         )
-        return None
+        debug_log(f"parser uid={email.uid}: {trace.failure_reason}", debug)
+        return None, trace
 
     return {
         "event_type": event_type,
         "status": status,
         "location": str(data["location"]),
         "start_time": start_time,
-    }
+    }, trace
 
 
-def _build_llm_prompt(email: EmailRecord, deterministic_candidate: dict | None) -> str:
+def _build_llm_prompt(
+    email: EmailRecord,
+    deterministic_candidate: dict | None,
+    profile: SourceProfile | None = None,
+    prompt_context: str = "",
+) -> str:
     candidate = _candidate_for_prompt(deterministic_candidate)
 
-    return f"""
-Extract and validate one InClubGolf calendar event from this email.
+    if profile is not None:
+        base = profile.prompt_template
+    else:
+        base = _BUILTIN_PROMPT_TEMPLATE
 
-Use the deterministic_candidate as a proposed parse. Confirm it if correct; correct it if the
-email text shows different event details. This LLM response is required even when the candidate
-looks complete.
+    context_block = ""
+    if prompt_context.strip():
+        context_block = f"\n\nLearned context:\n{prompt_context.strip()}"
 
-Return one JSON object only:
-{{
-  "is_event": true,
-  "event_type": "Practice" or "Lesson",
-  "status": "Reserved" or "Canceled",
-  "location": "clean location string",
-  "date": "MM/DD/YYYY",
-  "time": "HH:MM AM/PM",
-  "confidence": number between 0 and 1
-}}
-
-If this is not a lesson/practice reservation or cancellation, return:
-{{"is_event": false, "confidence": 0}}
-
-Rules:
-- All event times are America/New_York.
-- Do not invent missing date, time, type, status, or location.
-- Treat "cancelled" and "canceled" as "Canceled".
-- Treat confirmed/reserved bookings as "Reserved".
-- Keep the location in the form used by the email, for example "Lake Nona in North Bay".
+    return f"""{base}{context_block}
 
 deterministic_candidate:
 {json.dumps(candidate, indent=2)}
@@ -216,8 +265,37 @@ Subject:
 {email.subject}
 
 Body:
-{email.body}
-""".strip()
+{email.body}""".strip()
+
+
+_BUILTIN_PROMPT_TEMPLATE = """\
+Extract and validate one InClubGolf calendar event from this email.
+
+Use the deterministic_candidate as a proposed parse. Confirm it if correct; correct it if the
+email text shows different event details. This LLM response is required even when the candidate
+looks complete.
+
+Return one JSON object only:
+{
+  "is_event": true,
+  "event_type": "Practice" or "Lesson",
+  "status": "Reserved" or "Canceled",
+  "location": "clean location string",
+  "date": "MM/DD/YYYY",
+  "time": "HH:MM AM/PM",
+  "confidence": number between 0 and 1
+}
+
+If this is not a lesson/practice reservation or cancellation, return:
+{"is_event": false, "confidence": 0}
+
+Rules:
+- All event times are America/New_York.
+- Do not invent missing date, time, type, status, or location.
+- Treat "cancelled" and "canceled" as "Canceled".
+- Treat confirmed/reserved bookings as "Reserved".
+- Keep the location in the form used by the email, for example "Lake Nona in North Bay".\
+"""
 
 
 def _extract_event_type(text: str) -> str | None:
@@ -236,7 +314,7 @@ def _extract_status(text: str) -> str | None:
     return None
 
 
-def _valid_event_type(value) -> str | None:
+def _valid_event_type(value: object) -> str | None:
     if isinstance(value, str) and value.strip().lower() == "practice":
         return "Practice"
     if isinstance(value, str) and value.strip().lower() == "lesson":
@@ -244,7 +322,7 @@ def _valid_event_type(value) -> str | None:
     return None
 
 
-def _valid_status(value) -> str | None:
+def _valid_status(value: object) -> str | None:
     if isinstance(value, str) and value.strip().lower() in {"canceled", "cancelled"}:
         return "Canceled"
     if isinstance(value, str) and value.strip().lower() == "reserved":
