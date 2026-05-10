@@ -29,6 +29,8 @@ class _Result:
     trashed_uids = set()
     skipped = []
     errors = []
+    corrections_saved = 0
+    prompts_updated = 0
 
     @property
     def not_parsed_count(self):

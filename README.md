@@ -136,3 +136,65 @@ Apply changes:
 ```bash
 uv run calendar-agent
 ```
+
+## Profile Configuration
+
+By default the agent loads `profiles.yaml` from the project root. Each profile
+defines which emails to match and what prompt to send the LLM.
+
+```yaml
+profiles:
+  - name: my-source
+    from_pattern: "alerts@example\\.com"
+    subject_pattern: "Booking.*"   # optional, default .*
+    # to_pattern: ".*"             # optional
+    # body_pattern: ".*"           # optional
+    prompt_template: |
+      Extract a calendar event ...
+```
+
+All patterns are Python `re` expressions matched against the email field.
+The first matching profile wins. Override the path with `AGENT_PROFILES_FILE=...`.
+
+## Interactive Learning
+
+When an email fails to parse, the agent can pause and ask you to correct it
+interactively. Enable in `.env.local` (never commit this to source control):
+
+```env
+PROMPT_FOR_FAILURE=true
+```
+
+The agent only activates this when running in an interactive TTY. In cron or
+piped contexts the flag is silently ignored and failures are logged normally.
+
+**What happens when a parse fails:**
+
+1. The agent prints a full trace: email subject, body preview, deterministic
+   candidate, the LLM prompt sent, and the raw LLM response with the failure reason.
+2. You choose: `y` (valid event), `n` (not an event), `s` (skip), `S` (skip all).
+3. If `y`: walk through the fields interactively. The agent pre-fills what it
+   already knows; press Enter to accept, or type a correction.
+4. The agent attempts a full sync immediately.
+5. On success, you choose whether to save the correction for future runs.
+6. Optionally add a prompt rule to help the LLM handle similar emails next time.
+
+**What gets saved** (in `.calendar-agent/learned/{profile}/`):
+
+| File | Contents |
+|------|----------|
+| `examples.json` | Confirmed corrections used as few-shot examples |
+| `ignored.json` | Subject patterns permanently marked as non-events |
+| `prompt_overrides.json` | Operator-supplied rules injected into the prompt |
+
+This directory is gitignored by default. You can commit it selectively to share
+learned corrections across machines.
+
+**New `.env` keys:**
+
+```env
+PROMPT_FOR_FAILURE=false          # set true in .env.local to enable
+AGENT_PROFILES_FILE=profiles.yaml # path to profile config
+AGENT_LEARNING_DIR=.calendar-agent/learned
+MAX_PROMPT_CHARS=12000            # trim oldest examples if prompt grows too large
+```

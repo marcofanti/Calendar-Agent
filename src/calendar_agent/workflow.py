@@ -7,6 +7,7 @@ from calendar_agent.debug import debug_log, exception_summary
 from calendar_agent.email_client import ImapEmailClient
 from calendar_agent.google_calendar import GoogleCalendarClient
 from calendar_agent.ics import write_ics_file
+from calendar_agent.learning import run_correction_loop
 from calendar_agent.learning.store import LearningStore
 from calendar_agent.llm import LlmClient, llm_from_env
 from calendar_agent.models import EmailRecord, GolfEvent, RunResult
@@ -24,6 +25,7 @@ def run_sync(
     llm_client: LlmClient | None = None,
     debug: bool = False,
     profiles: list[SourceProfile] | None = None,
+    ui=None,  # TerminalUI | None — avoid circular import at module level
 ) -> RunResult:
     result = RunResult()
     debug_log("searching mailbox for InClubGolf emails", debug)
@@ -42,6 +44,9 @@ def run_sync(
     learning_dir = Path(os.getenv("AGENT_LEARNING_DIR", ".calendar-agent/learned"))
     max_prompt_chars = int(os.getenv("MAX_PROMPT_CHARS", "12000"))
 
+    # Collect (email, attempt, profile, store) for failed parses — used by correction loop.
+    pending: list[tuple[EmailRecord, ParseAttempt, SourceProfile | None, LearningStore | None]] = []
+
     for email in emails:
         debug_log(
             f"processing email uid={email.uid} folder={email.folder!r} subject={email.subject!r} body_chars={len(email.body)}",
@@ -51,6 +56,7 @@ def run_sync(
         profile = match_profile(email, profiles) if profiles else None
         debug_log(f"email uid={email.uid}: matched profile={profile.name if profile else None}", debug)
 
+        store: LearningStore | None = None
         prompt_context = ""
         if profile is not None:
             store = LearningStore(profile.name, base_dir=learning_dir)
@@ -81,6 +87,7 @@ def run_sync(
                 result.errors.append(f"{email.uid}: {reason}")
             else:
                 result.skipped.append(f"{email.uid}: could not parse {email.subject!r}")
+                pending.append((email, attempt, profile, store))
             continue
 
         _sync_event(
@@ -95,7 +102,77 @@ def run_sync(
             result=result,
         )
 
+    # --- interactive correction loop ---
+    if ui is not None and ui.is_interactive() and pending:
+        _run_corrections(
+            pending=pending,
+            result=result,
+            email_client=email_client,
+            google_client=google_client,
+            outlook_client=outlook_client,
+            ics_output_dir=ics_output_dir,
+            dry_run=dry_run,
+            debug=debug,
+            ui=ui,
+        )
+
     return result
+
+
+def _run_corrections(
+    pending,
+    result: RunResult,
+    email_client,
+    google_client,
+    outlook_client,
+    ics_output_dir,
+    dry_run,
+    debug,
+    ui,
+) -> None:
+    ui.info(f"\n{len(pending)} email(s) failed to parse. Starting correction loop...")
+
+    for email, attempt, profile, store in pending:
+        def sync_fn(event: GolfEvent, _email=email) -> bool:
+            try:
+                _sync_event(
+                    event=event,
+                    email=_email,
+                    email_client=email_client,
+                    google_client=google_client,
+                    outlook_client=outlook_client,
+                    ics_output_dir=ics_output_dir,
+                    dry_run=dry_run,
+                    debug=debug,
+                    result=result,
+                )
+                return True
+            except Exception as exc:
+                ui.info(f"Sync error: {exception_summary(exc)}")
+                return False
+
+        correction = run_correction_loop(
+            email=email,
+            attempt=attempt,
+            profile=profile,
+            store=store,
+            ui=ui,
+            sync_fn=sync_fn,
+        )
+
+        if correction.outcome == "synced":
+            # Remove the skipped entry we added earlier
+            skipped_key = f"{email.uid}: could not parse {email.subject!r}"
+            if skipped_key in result.skipped:
+                result.skipped.remove(skipped_key)
+            if correction.correction_saved:
+                result.corrections_saved += 1
+            if correction.prompt_updated:
+                result.prompts_updated += 1
+
+        elif correction.outcome == "stop":
+            ui.info("Stopping correction loop.")
+            break
 
 
 def _sync_event(

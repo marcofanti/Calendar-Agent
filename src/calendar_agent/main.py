@@ -10,6 +10,7 @@ from calendar_agent.debug import debug_enabled, debug_log
 from calendar_agent.email_client import build_email_client_from_env
 from calendar_agent.google_calendar import GoogleCalendarClient
 from calendar_agent.outlook_calendar import OutlookCalendarClient
+from calendar_agent.terminal_ui import TerminalUI
 from calendar_agent.workflow import run_sync
 
 
@@ -29,8 +30,16 @@ def main() -> None:
     dry_run = args.dry_run or os.getenv("DRY_RUN", "false").lower() in {"1", "true", "yes"}
     debug = args.debug or debug_enabled()
     ics_output_dir = Path(os.getenv("ICS_OUTPUT_DIR", "~/Downloads/inclubgolf"))
+    prompt_for_failure = os.getenv("PROMPT_FOR_FAILURE", "false").lower() in {"1", "true", "yes"}
+
     debug_log(f"mode dry_run={dry_run}", debug)
     debug_log(f"ics_output_dir={ics_output_dir}", debug)
+    debug_log(f"prompt_for_failure={prompt_for_failure}", debug)
+
+    ui = TerminalUI()
+    if prompt_for_failure and not ui.is_interactive():
+        debug_log("PROMPT_FOR_FAILURE=true but no interactive TTY — correction loop disabled", debug)
+        prompt_for_failure = False
 
     email_client = build_email_client_from_env(debug=debug)
     if dry_run:
@@ -47,6 +56,7 @@ def main() -> None:
         ics_output_dir=ics_output_dir,
         dry_run=dry_run,
         debug=debug,
+        ui=ui if prompt_for_failure else None,
     )
 
     mode = "DRY RUN" if dry_run else "APPLIED"
@@ -58,6 +68,10 @@ def main() -> None:
     print(f"Outlook synced: {len(result.outlook_success)}")
     print(f"ICS files written: {len(result.ics_success)}")
     print(f"Emails moved to Trash: {len(result.trashed_uids)}")
+    if result.corrections_saved:
+        print(f"Corrections saved: {result.corrections_saved}")
+    if result.prompts_updated:
+        print(f"Prompt rules added: {result.prompts_updated}")
     if result.skipped:
         print(f"Skipped / not calendar events: {len(result.skipped)}")
         for item in result.skipped:
