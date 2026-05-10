@@ -61,11 +61,14 @@ def run_correction_loop(
         return CorrectionResult(outcome="ignored")
 
     # answer == "yes" — walk through fields
+    from calendar_agent.profiles import DEFAULT_DURATION_MINUTES
+    duration = profile.duration_minutes if profile is not None else DEFAULT_DURATION_MINUTES
+
     correction = _collect_fields(attempt.trace, ui)
     if correction is None:
         return CorrectionResult(outcome="skipped")
 
-    event = _build_event_from_correction(email, correction)
+    event = _build_event_from_correction(email, correction, duration_minutes=duration)
 
     while True:
         if not ui.ask_run_sync():
@@ -78,7 +81,7 @@ def run_correction_loop(
         correction = _collect_fields(attempt.trace, ui, defaults=correction)
         if correction is None:
             return CorrectionResult(outcome="skipped")
-        event = _build_event_from_correction(email, correction)
+        event = _build_event_from_correction(email, correction, duration_minutes=duration)
 
     correction_saved = False
     prompt_updated = False
@@ -157,7 +160,11 @@ def _validate_fields(
     return errors
 
 
-def _build_event_from_correction(email: EmailRecord, correction: dict) -> GolfEvent:
+def _build_event_from_correction(
+    email: EmailRecord,
+    correction: dict,
+    duration_minutes: int = 30,
+) -> GolfEvent:
     event_type = correction["event_type"]
     status = correction["status"]
     location = correction["location"]
@@ -165,7 +172,7 @@ def _build_event_from_correction(email: EmailRecord, correction: dict) -> GolfEv
         f"{correction['date']} {correction['time']}",
         "%m/%d/%Y %I:%M %p",
     ).replace(tzinfo=EASTERN)
-    end_time = start_time + timedelta(minutes=20)
+    end_time = start_time + timedelta(minutes=duration_minutes)
     event_uid = make_event_uid(event_type, location, start_time)
     action = "canceled" if status == "Canceled" else "reserved"
     formatted = start_time.strftime("%A, %B %-d, %Y at %-I:%M %p %Z")
@@ -173,7 +180,7 @@ def _build_event_from_correction(email: EmailRecord, correction: dict) -> GolfEv
         f"InClubGolf {event_type.lower()} {action}.",
         f"Location: {location}",
         f"Time: {formatted}",
-        "Duration: 20 minutes",
+        f"Duration: {duration_minutes} minutes",
         "Created from interactive correction.",
     ])
     return GolfEvent(

@@ -14,6 +14,9 @@ class ProfileConfigError(Exception):
     pass
 
 
+DEFAULT_DURATION_MINUTES = 30
+
+
 @dataclass(frozen=True)
 class SourceProfile:
     name: str
@@ -22,6 +25,7 @@ class SourceProfile:
     to_pattern: re.Pattern | None
     body_pattern: re.Pattern | None
     prompt_template: str
+    duration_minutes: int = DEFAULT_DURATION_MINUTES
 
 
 def load_profiles(path: Path) -> list[SourceProfile]:
@@ -129,6 +133,10 @@ def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
     if not isinstance(prompt_template, str) or not prompt_template.strip():
         raise ProfileConfigError(f"{path}: profile '{name}' missing required 'prompt_template'")
 
+    raw_duration = raw.get("duration_minutes", DEFAULT_DURATION_MINUTES)
+    if not isinstance(raw_duration, int) or raw_duration <= 0:
+        raise ProfileConfigError(f"{path}: profile '{name}'.duration_minutes must be a positive integer")
+
     return SourceProfile(
         name=name,
         from_pattern=from_pat,
@@ -136,6 +144,7 @@ def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
         to_pattern=to_pat,
         body_pattern=body_pat,
         prompt_template=prompt_template.strip(),
+        duration_minutes=raw_duration,
     )
 
 

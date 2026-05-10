@@ -2,6 +2,7 @@ profiles:
   - name: inclubgolf
     from_pattern: "noreply@inclubgolf\\.com"
     subject_pattern: ".*"
+    duration_minutes: 20
     # to_pattern: ".*"       # optional: match recipient address
     # body_pattern: ".*"     # optional: match body content
     prompt_template: |
@@ -31,3 +32,37 @@ profiles:
       - Treat "cancelled" and "canceled" as "Canceled".
       - Treat confirmed/reserved bookings as "Reserved".
       - Keep the location in the form used by the email, for example "Lake Nona in North Bay".
+
+  - name: courtreserve
+    from_pattern: "notifications_at_courtreserve_com_2r6q26xw5k3936_566ad789@icloud\\.com"
+    subject_pattern: ".*"
+    duration_minutes: 90
+    # to_pattern: ".*"       # optional: match recipient address
+    # body_pattern: ".*"     # optional: match body content
+    prompt_template: |
+      Extract and validate one CourtReserve court booking from this email.
+
+      Use the deterministic_candidate as a proposed parse. Confirm it if correct; correct it if the
+      email text shows different booking details. This LLM response is required even when the candidate
+      looks complete.
+
+      Return one JSON object only:
+      {
+        "is_event": true,
+        "event_type": "Tennis" or "Pickleball" or "Court",
+        "status": "Reserved" or "Canceled",
+        "location": "clean court/facility name string",
+        "date": "MM/DD/YYYY",
+        "time": "HH:MM AM/PM",
+        "confidence": number between 0 and 1
+      }
+
+      If this is not a court booking reservation or cancellation, return:
+      {"is_event": false, "confidence": 0}
+
+      Rules:
+      - All event times are America/New_York.
+      - Do not invent missing date, time, type, status, or location.
+      - Treat "cancelled" and "canceled" as "Canceled".
+      - Treat confirmed/reserved/booked bookings as "Reserved".
+      - Keep the location in the form used by the email, including court number if present.

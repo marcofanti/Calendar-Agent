@@ -81,15 +81,17 @@ def parse_email(
     if parsed is None:
         return ParseAttempt(event=None, trace=trace)
 
+    from calendar_agent.profiles import DEFAULT_DURATION_MINUTES
     text = _normalize_text(f"{email.subject}\n{email.body}")
     event_type = parsed["event_type"]
     status = parsed["status"]
     location = _normalize_location(parsed["location"])
     start_time = parsed["start_time"]
-    end_time = start_time + timedelta(minutes=20)
+    duration = profile.duration_minutes if profile is not None else DEFAULT_DURATION_MINUTES
+    end_time = start_time + timedelta(minutes=duration)
     cancel_url = _extract_cancel_url(text)
     event_uid = make_event_uid(event_type, location, start_time)
-    description = _build_description(event_type, status, location, start_time, cancel_url)
+    description = _build_description(event_type, status, location, start_time, cancel_url, duration)
 
     event = GolfEvent(
         source_uid=email.uid,
@@ -344,6 +346,7 @@ def _build_description(
     location: str,
     start_time: datetime,
     cancel_url: str | None,
+    duration_minutes: int = 30,
 ) -> str:
     action = "canceled" if status == "Canceled" else "reserved"
     formatted_time = start_time.astimezone(EASTERN).strftime("%A, %B %-d, %Y at %-I:%M %p %Z")
@@ -351,7 +354,7 @@ def _build_description(
         f"InClubGolf {event_type.lower()} {action}.",
         f"Location: {location}",
         f"Time: {formatted_time}",
-        "Duration: 20 minutes",
+        f"Duration: {duration_minutes} minutes",
     ]
     if cancel_url:
         lines.append(f"Cancellation link: {cancel_url}")

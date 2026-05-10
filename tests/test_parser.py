@@ -39,7 +39,7 @@ def test_parse_practice_confirmation_example():
     assert event.status == "Reserved"
     assert event.location == "Lake Nona in North Bay"
     assert event.start_time == datetime(2026, 5, 14, 17, 40, tzinfo=ZoneInfo("America/New_York"))
-    assert event.end_time == event.start_time + timedelta(minutes=20)
+    assert event.end_time == event.start_time + timedelta(minutes=30)
     assert event.cancel_url == "https://members.inclubgolf.com/Scheduler/Cancel?reservationId=253676"
     assert event.title == "InClubGolf Practice - Lake Nona in North Bay"
 
