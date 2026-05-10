@@ -331,6 +331,8 @@ def _body_from_message(msg) -> str:
             if part.get_content_disposition() == "attachment":
                 continue
             content_type = part.get_content_type()
+            if content_type.startswith("multipart/"):
+                continue
             payload = part.get_content()
             if content_type == "text/plain" and not plain:
                 plain = str(payload)
