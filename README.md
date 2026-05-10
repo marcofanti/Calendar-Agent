@@ -159,7 +159,7 @@ The first matching profile wins. Override the path with `AGENT_PROFILES_FILE=...
 ## Interactive Learning
 
 When an email fails to parse, the agent can pause and ask you to correct it
-interactively. Enable in `.env.local` (never commit this to source control):
+interactively. Enable in `.env`:
 
 ```env
 PROMPT_FOR_FAILURE=true

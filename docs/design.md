@@ -296,10 +296,6 @@ AGENT_LEARNING_DIR=.calendar-agent/learned
 MAX_PROMPT_CHARS=12000
 ```
 
-### .env.local (new file, gitignored)
-
-Same keys — operator overrides without touching `.env`.
-
 ---
 
 ## 9. Migration
@@ -325,6 +321,5 @@ users see zero change until they opt in via `AGENT_PROFILES_FILE`.
 | `src/calendar_agent/models.py` | MODIFY — add corrections_saved, prompts_updated to RunResult |
 | `profiles.yaml` | NEW — default profile config (InClubGolf) |
 | `.env` | MODIFY — add new keys |
-| `.env.local.example` | NEW — template for local overrides |
-| `.gitignore` | MODIFY — add .calendar-agent/, .env.local |
+| `.gitignore` | MODIFY — add .calendar-agent/ |
 | `tests/` | NEW — unit tests for all new modules |
