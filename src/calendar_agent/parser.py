@@ -109,6 +109,7 @@ def parse_email(
         start_time=start_time,
         end_time=end_time,
         cancel_url=cancel_url,
+        source_label=source_label,
     )
     return ParseAttempt(event=event, trace=trace)
 

@@ -32,6 +32,7 @@ class GolfEvent:
     start_time: datetime
     end_time: datetime
     cancel_url: str | None = None
+    source_label: str = "InClubGolf"
 
     @property
     def is_canceled(self) -> bool:
@@ -39,7 +40,11 @@ class GolfEvent:
 
     @property
     def title(self) -> str:
-        base = f"InClubGolf {self.event_type} - {self.location}"
+        base = (
+            f"{self.source_label} {self.event_type} - {self.location}"
+            if self.location
+            else f"{self.source_label} {self.event_type}"
+        )
         if self.is_canceled:
             return f"[CANCELED] {base}"
         return base

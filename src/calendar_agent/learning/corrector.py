@@ -97,9 +97,25 @@ def run_correction_loop(
         correction_saved = True
         ui.info("Correction saved.")
 
-        prompt_updated = _maybe_save_prompt_override(
-            attempt.trace, correction, store, ui
-        )
+        # When the LLM returned is_event=false but the operator confirmed it IS an event,
+        # a few-shot example alone is not enough to override the explicit prompt instruction.
+        # Auto-save a positive rule so the LLM receives a direct override next time.
+        if attempt.trace.failure_reason == "LLM returned is_event=false":
+            override = store.new_override(
+                content=(
+                    f"Emails with subject '{email.subject}' ARE valid calendar events "
+                    f"(operator confirmed). Always return is_event=true and extract "
+                    f"event_type, date, start_time, end_time from the body."
+                ),
+                trigger_subject=email.subject,
+            )
+            store.save_override(override)
+            prompt_updated = True
+            ui.info("Auto-saved prompt rule: future similar emails will be treated as events.")
+        else:
+            prompt_updated = _maybe_save_prompt_override(
+                attempt.trace, correction, store, ui
+            )
 
     return CorrectionResult(
         outcome="synced",
@@ -232,6 +248,7 @@ def _build_event_from_correction(
         description=description,
         start_time=start_time,
         end_time=end_time,
+        source_label=source_label,
     )
 
 

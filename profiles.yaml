@@ -43,20 +43,26 @@ profiles:
     # to_pattern: ".*"       # optional: match recipient address
     # body_pattern: ".*"     # optional: match body content
     prompt_template: |
-      Extract and validate one CourtReserve court booking from this email.
+      Extract and validate one CourtReserve event registration from this email.
 
-      The email body contains the event title on the first line, the date on the second line,
-      and a time range (start - end) on the third line.
+      These emails confirm registrations for any type of event at the facility:
+      court bookings, programs, parties, clinics, social events, etc.
 
+      The email body contains the event title, the date, and a time range.
       Example body format:
         Singles Live Ball (3.5+) FR 6:00P (Spring 2026)
         4/24/2026
         6:00 PM - 7:30 PM
 
+      Another example (party/social):
+        April 105 Party (3.5+)
+        4/19/2026
+        12:30 PM - 2:30 PM
+
       Return one JSON object only:
       {
         "is_event": true,
-        "event_type": "full event title exactly as it appears in the email (e.g. Singles Live Ball (3.5+) FR 6:00P (Spring 2026))",
+        "event_type": "full event title exactly as it appears in the email",
         "status": "Reserved" or "Canceled",
         "location": "facility or court name if present, otherwise empty string",
         "date": "MM/DD/YYYY",
@@ -65,13 +71,14 @@ profiles:
         "confidence": number between 0 and 1
       }
 
-      If this is not a court booking reservation or cancellation, return:
+      If this email does not contain a date and time for an event registration, return:
       {"is_event": false, "confidence": 0}
 
       Rules:
       - All event times are America/New_York.
       - Do not invent missing date, start_time, end_time, or event_type.
       - Treat "cancelled" and "canceled" as "Canceled".
-      - Treat confirmed/reserved/booked bookings as "Reserved".
-      - Derive start_time and end_time from the time range line (e.g. "6:00 PM - 7:30 PM").
+      - Treat confirmed/reserved/booked/registered as "Reserved".
+      - Derive start_time and end_time from the time range (e.g. "6:00 PM - 7:30 PM").
       - Keep the event_type exactly as the title appears in the email body.
+      - ANY registration confirmation with a date and time is a valid event.
