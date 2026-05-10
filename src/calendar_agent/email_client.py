@@ -357,9 +357,16 @@ def _body_from_message(msg) -> str:
 
 
 def _strip_html(html: str) -> str:
-    text = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
-    text = re.sub(r"(?s)<[^>]+>", " ", text)
-    return unescape(re.sub(r"\s+", " ", text)).strip()
+    text = re.sub(r"(?is)<(script|style).*?</\1>", "", html)
+    # Block-level elements become newlines so structure is preserved
+    text = re.sub(r"(?i)<(?:br\s*/?|/(?:p|div|tr|li|h[1-6]|table|thead|tbody|section|article))>", "\n", text)
+    text = re.sub(r"(?s)<[^>]+>", "", text)
+    text = unescape(text)
+    # Collapse runs of spaces/tabs but keep newlines
+    text = re.sub(r"[^\S\n]+", " ", text)
+    # Collapse 3+ consecutive newlines to 2
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _decode_gmail_raw(raw: str) -> bytes:

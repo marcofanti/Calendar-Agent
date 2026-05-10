@@ -291,6 +291,11 @@ def _build_llm_prompt(
     if prompt_context.strip():
         context_block = f"\n\nLearned context:\n{prompt_context.strip()}"
 
+    body = email.body
+    if profile is not None and profile.body_max_chars is not None:
+        if len(body) > profile.body_max_chars:
+            body = body[: profile.body_max_chars] + "\n[body truncated]"
+
     return f"""{base}{context_block}
 
 deterministic_candidate:
@@ -300,7 +305,7 @@ Subject:
 {email.subject}
 
 Body:
-{email.body}""".strip()
+{body}""".strip()
 
 
 _BUILTIN_PROMPT_TEMPLATE = """\
