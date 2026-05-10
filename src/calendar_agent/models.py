@@ -6,7 +6,7 @@ from typing import Literal
 
 
 EventStatus = Literal["Reserved", "Canceled"]
-EventType = Literal["Practice", "Lesson"]
+EventType = str  # profile-defined; InClubGolf uses "Practice"/"Lesson"
 
 
 @dataclass(slots=True)

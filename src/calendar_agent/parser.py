@@ -87,11 +87,16 @@ def parse_email(
     status = parsed["status"]
     location = _normalize_location(parsed["location"])
     start_time = parsed["start_time"]
-    duration = profile.duration_minutes if profile is not None else DEFAULT_DURATION_MINUTES
-    end_time = start_time + timedelta(minutes=duration)
+    if parsed.get("end_time") is not None:
+        end_time = parsed["end_time"]
+        duration = int((end_time - start_time).total_seconds() // 60)
+    else:
+        duration = profile.duration_minutes if profile is not None else DEFAULT_DURATION_MINUTES
+        end_time = start_time + timedelta(minutes=duration)
     cancel_url = _extract_cancel_url(text)
     event_uid = make_event_uid(event_type, location, start_time)
-    description = _build_description(event_type, status, location, start_time, cancel_url, duration)
+    source_label = profile.name.capitalize() if profile is not None else "InClubGolf"
+    description = _build_description(event_type, status, location, start_time, cancel_url, duration, source_label)
 
     event = GolfEvent(
         source_uid=email.uid,
@@ -204,7 +209,12 @@ def _parse_with_llm(
         debug_log(f"parser uid={email.uid}: rejected because is_event=false", debug)
         return None, trace
 
-    event_type = _valid_event_type(data.get("event_type"))
+    # When a profile is set it defines valid event_type values via its prompt template;
+    # accept any non-empty string. Without a profile, enforce InClubGolf values.
+    if profile is not None:
+        event_type = str(data.get("event_type", "")).strip() or None
+    else:
+        event_type = _valid_event_type(data.get("event_type"))
     status = _valid_status(data.get("status"))
     if event_type is None or status is None:
         trace.failure_reason = (
@@ -214,7 +224,14 @@ def _parse_with_llm(
         debug_log(f"parser uid={email.uid}: {trace.failure_reason}", debug)
         return None, trace
 
-    missing = [f for f in ("location", "date", "time") if not data.get(f)]
+    # Support both "time" (InClubGolf style) and "start_time" (profiles with explicit end time)
+    time_value = data.get("time") or data.get("start_time")
+    # location may be empty string (no court specified) — only reject if absent entirely
+    missing = [f for f in ("date",) if not data.get(f)]
+    if data.get("location") is None:
+        missing.append("location")
+    if not time_value:
+        missing.append("time / start_time")
     if missing:
         trace.failure_reason = f"Missing required field(s): {', '.join(missing)}"
         debug_log(f"parser uid={email.uid}: {trace.failure_reason}", debug)
@@ -222,22 +239,38 @@ def _parse_with_llm(
 
     try:
         start_time = datetime.strptime(
-            f"{data['date']} {data['time']}",
+            f"{data['date']} {time_value}",
             "%m/%d/%Y %I:%M %p",
         ).replace(tzinfo=EASTERN)
     except Exception as exc:
         trace.failure_reason = (
-            f"Invalid date/time date={data.get('date')!r} time={data.get('time')!r}: "
+            f"Invalid date/time date={data.get('date')!r} time={time_value!r}: "
             f"{exception_summary(exc)}"
         )
         debug_log(f"parser uid={email.uid}: {trace.failure_reason}", debug)
         return None, trace
+
+    # Parse explicit end_time when the profile provides it (e.g. CourtReserve)
+    end_time_dt = None
+    if data.get("end_time"):
+        try:
+            end_time_dt = datetime.strptime(
+                f"{data['date']} {data['end_time']}",
+                "%m/%d/%Y %I:%M %p",
+            ).replace(tzinfo=EASTERN)
+        except Exception as exc:
+            debug_log(
+                f"parser uid={email.uid}: ignoring unparseable end_time={data['end_time']!r}: "
+                f"{exception_summary(exc)}",
+                debug,
+            )
 
     return {
         "event_type": event_type,
         "status": status,
         "location": str(data["location"]),
         "start_time": start_time,
+        "end_time": end_time_dt,  # None → fall back to profile duration_minutes
     }, trace
 
 
@@ -347,11 +380,12 @@ def _build_description(
     start_time: datetime,
     cancel_url: str | None,
     duration_minutes: int = 30,
+    source_label: str = "InClubGolf",
 ) -> str:
     action = "canceled" if status == "Canceled" else "reserved"
     formatted_time = start_time.astimezone(EASTERN).strftime("%A, %B %-d, %Y at %-I:%M %p %Z")
     lines = [
-        f"InClubGolf {event_type.lower()} {action}.",
+        f"{source_label} {event_type.lower()} {action}.",
         f"Location: {location}",
         f"Time: {formatted_time}",
         f"Duration: {duration_minutes} minutes",

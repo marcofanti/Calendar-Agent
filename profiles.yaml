@@ -36,24 +36,29 @@ profiles:
   - name: courtreserve
     from_pattern: "notifications_at_courtreserve_com_2r6q26xw5k3936_566ad789@icloud\\.com"
     subject_pattern: ".*"
-    duration_minutes: 90
+    duration_minutes: 90   # fallback only — end_time is parsed from the email body
     # to_pattern: ".*"       # optional: match recipient address
     # body_pattern: ".*"     # optional: match body content
     prompt_template: |
       Extract and validate one CourtReserve court booking from this email.
 
-      Use the deterministic_candidate as a proposed parse. Confirm it if correct; correct it if the
-      email text shows different booking details. This LLM response is required even when the candidate
-      looks complete.
+      The email body contains the event title on the first line, the date on the second line,
+      and a time range (start - end) on the third line.
+
+      Example body format:
+        Singles Live Ball (3.5+) FR 6:00P (Spring 2026)
+        4/24/2026
+        6:00 PM - 7:30 PM
 
       Return one JSON object only:
       {
         "is_event": true,
-        "event_type": "Tennis" or "Pickleball" or "Court",
+        "event_type": "full event title exactly as it appears in the email (e.g. Singles Live Ball (3.5+) FR 6:00P (Spring 2026))",
         "status": "Reserved" or "Canceled",
-        "location": "clean court/facility name string",
+        "location": "facility or court name if present, otherwise empty string",
         "date": "MM/DD/YYYY",
-        "time": "HH:MM AM/PM",
+        "start_time": "HH:MM AM/PM",
+        "end_time": "HH:MM AM/PM",
         "confidence": number between 0 and 1
       }
 
@@ -62,7 +67,8 @@ profiles:
 
       Rules:
       - All event times are America/New_York.
-      - Do not invent missing date, time, type, status, or location.
+      - Do not invent missing date, start_time, end_time, or event_type.
       - Treat "cancelled" and "canceled" as "Canceled".
       - Treat confirmed/reserved/booked bookings as "Reserved".
-      - Keep the location in the form used by the email, including court number if present.
+      - Derive start_time and end_time from the time range line (e.g. "6:00 PM - 7:30 PM").
+      - Keep the event_type exactly as the title appears in the email body.

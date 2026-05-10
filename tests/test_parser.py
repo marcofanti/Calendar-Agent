@@ -1,8 +1,10 @@
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from calendar_agent.models import EmailRecord
-from calendar_agent.parser import parse_inclubgolf_email
+from calendar_agent.parser import parse_email, parse_inclubgolf_email
+from calendar_agent.profiles import SourceProfile
 
 
 def test_parse_practice_confirmation_example():
@@ -126,6 +128,81 @@ def test_cancellation_subject_location_can_seed_candidate():
     assert event is not None
     assert event.status == "Canceled"
     assert '"location": "Lake Nona in North Bay"' in llm.prompts[0]
+
+
+def test_courtreserve_parses_start_and_end_time():
+    profile = SourceProfile(
+        name="courtreserve",
+        from_pattern=re.compile("notifications_at_courtreserve"),
+        subject_pattern=re.compile(".*"),
+        to_pattern=None,
+        body_pattern=None,
+        prompt_template="Extract a CourtReserve booking.",
+        duration_minutes=90,
+    )
+    llm = _FakeLlm({
+        "is_event": True,
+        "event_type": "Singles Live Ball (3.5+) FR 6:00P (Spring 2026)",
+        "status": "Reserved",
+        "location": "",
+        "date": "4/24/2026",
+        "start_time": "6:00 PM",
+        "end_time": "7:30 PM",
+        "confidence": 0.98,
+    })
+    email = EmailRecord(
+        uid="200",
+        message_id="msg-200",
+        subject="Court Booking Confirmed",
+        body="Singles Live Ball (3.5+) FR 6:00P (Spring 2026)\n4/24/2026\n6:00 PM - 7:30 PM",
+        sender="notifications_at_courtreserve_com_2r6q26xw5k3936_566ad789@icloud.com",
+    )
+
+    attempt = parse_email(email, llm_client=llm, profile=profile)
+    event = attempt.event
+
+    assert event is not None
+    assert event.event_type == "Singles Live Ball (3.5+) FR 6:00P (Spring 2026)"
+    assert event.status == "Reserved"
+    assert event.start_time == datetime(2026, 4, 24, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert event.end_time == datetime(2026, 4, 24, 19, 30, tzinfo=ZoneInfo("America/New_York"))
+    assert (event.end_time - event.start_time) == timedelta(minutes=90)
+
+
+def test_courtreserve_end_time_overrides_profile_duration():
+    profile = SourceProfile(
+        name="courtreserve",
+        from_pattern=re.compile("courtreserve"),
+        subject_pattern=re.compile(".*"),
+        to_pattern=None,
+        body_pattern=None,
+        prompt_template="Extract a CourtReserve booking.",
+        duration_minutes=90,
+    )
+    llm = _FakeLlm({
+        "is_event": True,
+        "event_type": "Singles Training (3.0-3.5) MO 7:30P (Spring 2026)",
+        "status": "Reserved",
+        "location": "",
+        "date": "4/20/2026",
+        "start_time": "7:30 PM",
+        "end_time": "9:00 PM",
+        "confidence": 0.97,
+    })
+    email = EmailRecord(
+        uid="201",
+        message_id="msg-201",
+        subject="Court Booking Confirmed",
+        body="Singles Training (3.0-3.5) MO 7:30P (Spring 2026)\n4/20/2026\n7:30 PM - 9:00 PM",
+        sender="notifications_at_courtreserve_com_2r6q26xw5k3936_566ad789@icloud.com",
+    )
+
+    attempt = parse_email(email, llm_client=llm, profile=profile)
+    event = attempt.event
+
+    assert event is not None
+    assert event.start_time == datetime(2026, 4, 20, 19, 30, tzinfo=ZoneInfo("America/New_York"))
+    assert event.end_time == datetime(2026, 4, 20, 21, 0, tzinfo=ZoneInfo("America/New_York"))
 
 
 class _FakeLlm:
