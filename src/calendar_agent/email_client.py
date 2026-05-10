@@ -77,7 +77,7 @@ class ImapEmailClient:
             self.debug,
         )
         with self._connect() as mail:
-            status, select_data = mail.select(folder)
+            status, select_data = mail.select(_imap_quote(folder))
             debug_log(f"{self.config.provider}: select status={status} data={select_data}", self.debug)
             if status != "OK":
                 raise RuntimeError(f"IMAP select failed for {folder}: {status} {select_data}")
@@ -361,3 +361,11 @@ def _strip_html(html: str) -> str:
 def _decode_gmail_raw(raw: str) -> bytes:
     padding = "=" * (-len(raw) % 4)
     return base64.urlsafe_b64decode((raw + padding).encode("ascii"))
+
+
+def _imap_quote(folder: str) -> str:
+    """Wrap an IMAP mailbox name in double-quotes when it contains spaces or quotes."""
+    if re.search(r'[ "\\]', folder):
+        escaped = folder.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return folder
