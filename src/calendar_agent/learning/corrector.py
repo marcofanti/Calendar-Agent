@@ -132,18 +132,26 @@ def _collect_fields(
         status = ui.ask_field("status", _default("status"), ["Reserved", "Canceled"])
         location = ui.ask_field("location", _default("location"))
         date = ui.ask_field("date (MM/DD/YYYY)", _default("date"))
-        time_ = ui.ask_field("time (HH:MM AM/PM)", _default("time"))
+        # Prefer start_time key (CourtReserve LLM response) then fall back to time
+        start_default = _default("start_time") or _default("time")
+        time_ = ui.ask_field("start_time (HH:MM AM/PM)" if free_form_type else "time (HH:MM AM/PM)", start_default)
+        end_time_ = ""
+        if free_form_type:
+            end_time_ = ui.ask_field("end_time (HH:MM AM/PM, optional)", _default("end_time"))
 
-        errors = _validate_fields(event_type, status, location, date, time_, free_form_type=free_form_type)
+        errors = _validate_fields(event_type, status, location, date, time_, end_time_, free_form_type=free_form_type)
         if not errors:
             norm_type = event_type.strip() if free_form_type else _norm_event_type(event_type)
-            return {
+            result = {
                 "event_type": norm_type,
                 "status": _norm_status(status),
                 "location": location.strip(),
                 "date": date.strip(),
                 "time": time_.strip(),
             }
+            if free_form_type:
+                result["end_time"] = end_time_.strip()
+            return result
 
         ui.info(f"  Validation errors: {'; '.join(errors)}")
         ui.info("  Please re-enter the fields above.")
@@ -151,6 +159,7 @@ def _collect_fields(
 
 def _validate_fields(
     event_type: str, status: str, location: str, date: str, time_: str,
+    end_time_: str = "",
     free_form_type: bool = False,
 ) -> list[str]:
     errors = []
@@ -165,9 +174,17 @@ def _validate_fields(
     if not free_form_type and not location.strip():
         errors.append("location is required")
     try:
-        datetime.strptime(f"{date.strip()} {time_.strip()}", "%m/%d/%Y %I:%M %p")
+        start_dt = datetime.strptime(f"{date.strip()} {time_.strip()}", "%m/%d/%Y %I:%M %p")
     except ValueError:
-        errors.append("date/time must be MM/DD/YYYY HH:MM AM/PM")
+        errors.append("date/start_time must be MM/DD/YYYY HH:MM AM/PM")
+        start_dt = None
+    if end_time_.strip():
+        try:
+            end_dt = datetime.strptime(f"{date.strip()} {end_time_.strip()}", "%m/%d/%Y %I:%M %p")
+            if start_dt is not None and end_dt <= start_dt:
+                errors.append("end_time must be after start_time")
+        except ValueError:
+            errors.append("end_time must be HH:MM AM/PM")
     return errors
 
 
@@ -184,7 +201,15 @@ def _build_event_from_correction(
         f"{correction['date']} {correction['time']}",
         "%m/%d/%Y %I:%M %p",
     ).replace(tzinfo=EASTERN)
-    end_time = start_time + timedelta(minutes=duration_minutes)
+    raw_end = correction.get("end_time", "").strip()
+    if raw_end:
+        end_time = datetime.strptime(
+            f"{correction['date']} {raw_end}",
+            "%m/%d/%Y %I:%M %p",
+        ).replace(tzinfo=EASTERN)
+        duration_minutes = int((end_time - start_time).total_seconds() // 60)
+    else:
+        end_time = start_time + timedelta(minutes=duration_minutes)
     event_uid = make_event_uid(event_type, location, start_time)
     action = "canceled" if status == "Canceled" else "reserved"
     formatted = start_time.strftime("%A, %B %-d, %Y at %-I:%M %p %Z")
