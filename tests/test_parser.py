@@ -102,6 +102,25 @@ def test_llm_is_called_even_when_deterministic_parser_has_no_candidate():
     assert "deterministic_candidate:\nnull" in llm.prompts[0]
 
 
+def test_deterministic_candidate_overrides_llm_is_event_false():
+    """When LLM returns is_event=false but deterministic candidate is complete, use candidate."""
+    llm = _FakeLlm({"is_event": False, "confidence": 0})
+    email = EmailRecord(
+        uid="9",
+        message_id="msg-9",
+        subject="Practice Canceled",
+        body="You have successfully canceled your Practice at Lake Nona in North Bay on 05/15/2026 at 08:40 AM.",
+    )
+
+    event = parse_inclubgolf_email(email, llm_client=llm)
+
+    assert event is not None
+    assert event.event_type == "Practice"
+    assert event.status == "Canceled"
+    assert event.location == "Lake Nona in North Bay"
+    assert event.start_time == datetime(2026, 5, 15, 8, 40, tzinfo=ZoneInfo("America/New_York"))
+
+
 def test_cancellation_subject_location_can_seed_candidate():
     llm = _FakeLlm(
         {

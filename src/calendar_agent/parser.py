@@ -79,7 +79,20 @@ def parse_email(
         prompt_context=prompt_context,
     )
     if parsed is None:
-        return ParseAttempt(event=None, trace=trace)
+        # LLM returned is_event=false but deterministic parser produced a complete candidate —
+        # the LLM is wrong; use the deterministic result rather than surfacing a false failure.
+        if (
+            trace.failure_reason == "LLM returned is_event=false"
+            and deterministic_candidate is not None
+        ):
+            debug_log(
+                f"parser uid={email.uid}: overriding LLM is_event=false with complete deterministic candidate",
+                debug,
+            )
+            parsed = {**deterministic_candidate, "end_time": None}
+            trace.failure_reason = None
+        else:
+            return ParseAttempt(event=None, trace=trace)
 
     from calendar_agent.profiles import DEFAULT_DURATION_MINUTES
     text = _normalize_text(f"{email.subject}\n{email.body}")
