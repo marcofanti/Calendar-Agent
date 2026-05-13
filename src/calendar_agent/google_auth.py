@@ -9,14 +9,18 @@ GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 GOOGLE_APP_SCOPES = [CALENDAR_SCOPE, GMAIL_MODIFY_SCOPE]
 
 
-def get_google_credentials(scopes: list[str] | None = None):
+def get_google_credentials(
+    scopes: list[str] | None = None,
+    credentials_file: str | None = None,
+    token_file: str | None = None,
+):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     scopes = scopes or GOOGLE_APP_SCOPES
-    token_file = Path(os.getenv("GOOGLE_TOKEN_FILE", "token.json"))
-    credentials_file = Path(os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json"))
+    token_file = Path(token_file or os.getenv("GOOGLE_TOKEN_FILE", "token.json"))
+    credentials_file = Path(credentials_file or os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json"))
     creds = None
 
     if token_file.exists():

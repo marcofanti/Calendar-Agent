@@ -17,6 +17,14 @@ class ProfileConfigError(Exception):
 DEFAULT_DURATION_MINUTES = 30
 
 
+@dataclass(frozen=True, slots=True)
+class MailAccount:
+    name: str
+    provider: str = "gmail"              # gmail | yahoo (yahoo planned)
+    credentials_file: str | None = None  # Gmail OAuth client JSON path
+    token_file: str | None = None        # Gmail OAuth token cache path
+
+
 @dataclass(frozen=True)
 class SourceProfile:
     name: str
@@ -26,9 +34,10 @@ class SourceProfile:
     body_pattern: re.Pattern | None
     prompt_template: str
     duration_minutes: int = DEFAULT_DURATION_MINUTES
-    mailbox: str | None = None  # IMAP folder / Gmail label; None → provider default (INBOX)
+    mailbox: str | None = None       # IMAP folder / Gmail label; None → provider default (INBOX)
     body_max_chars: int | None = None  # truncate body before sending to LLM; None → no limit
-    calendar_name: str | None = None  # X-WR-CALNAME hint in ICS exports; None → no hint
+    calendar_name: str | None = None   # X-WR-CALNAME hint in ICS exports; None → no hint
+    mail_account: str | None = None    # named account from accounts: section; None → default
 
     @property
     def from_search_term(self) -> str:
@@ -36,30 +45,38 @@ class SourceProfile:
         return re.sub(r"\\(.)", r"\1", self.from_pattern.pattern)
 
 
+def load_profiles_config(path: Path) -> tuple[list[SourceProfile], list[MailAccount]]:
+    """Parse profiles.yaml and return (profiles, accounts)."""
+    data = _load_yaml(path)
+    raw_profiles = data.get("profiles", [])
+    if not isinstance(raw_profiles, list):
+        raise ProfileConfigError(f"{path}: 'profiles' must be a list")
+    raw_accounts = data.get("accounts", [])
+    if not isinstance(raw_accounts, list):
+        raise ProfileConfigError(f"{path}: 'accounts' must be a list")
+    profiles = [_parse_profile(raw, i, path) for i, raw in enumerate(raw_profiles)]
+    accounts = [_parse_account(raw, i, path) for i, raw in enumerate(raw_accounts)]
+    return profiles, accounts
+
+
 def load_profiles(path: Path) -> list[SourceProfile]:
+    profiles, _ = load_profiles_config(path)
+    return profiles
+
+
+def _load_yaml(path: Path) -> dict:
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError as exc:
         raise ProfileConfigError("PyYAML is required for profiles. Run: pip install pyyaml") from exc
-
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         raise ProfileConfigError(f"Profiles file not found: {path}")
-
     try:
-        data = yaml.safe_load(text)
+        return yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
         raise ProfileConfigError(f"Invalid YAML in {path}: {exc}") from exc
-
-    raw_profiles = (data or {}).get("profiles", [])
-    if not isinstance(raw_profiles, list):
-        raise ProfileConfigError(f"{path}: 'profiles' must be a list")
-
-    profiles: list[SourceProfile] = []
-    for i, raw in enumerate(raw_profiles):
-        profiles.append(_parse_profile(raw, index=i, path=path))
-    return profiles
 
 
 def match_profile(email: "EmailRecord", profiles: list[SourceProfile]) -> SourceProfile | None:
@@ -124,6 +141,35 @@ def profiles_from_env() -> list[SourceProfile]:
     return load_profiles(profiles_file)
 
 
+def profiles_config_from_env() -> tuple[list[SourceProfile], list[MailAccount]]:
+    profiles_file = Path(os.getenv("AGENT_PROFILES_FILE", "profiles.yaml"))
+    ensure_default_profiles(profiles_file)
+    return load_profiles_config(profiles_file)
+
+
+def _parse_account(raw: object, index: int, path: Path) -> MailAccount:
+    if not isinstance(raw, dict):
+        raise ProfileConfigError(f"{path}: account[{index}] must be a mapping")
+    name = raw.get("name")
+    if not name or not isinstance(name, str):
+        raise ProfileConfigError(f"{path}: account[{index}] missing required 'name'")
+    provider = raw.get("provider", "gmail")
+    if not isinstance(provider, str) or provider not in {"gmail"}:
+        raise ProfileConfigError(f"{path}: account '{name}'.provider must be 'gmail'")
+    credentials_file = raw.get("credentials_file")
+    if credentials_file is not None and not isinstance(credentials_file, str):
+        raise ProfileConfigError(f"{path}: account '{name}'.credentials_file must be a string")
+    token_file = raw.get("token_file")
+    if token_file is not None and not isinstance(token_file, str):
+        raise ProfileConfigError(f"{path}: account '{name}'.token_file must be a string")
+    return MailAccount(
+        name=name,
+        provider=provider,
+        credentials_file=credentials_file or None,
+        token_file=token_file or None,
+    )
+
+
 def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
     if not isinstance(raw, dict):
         raise ProfileConfigError(f"{path}: profile[{index}] must be a mapping")
@@ -157,6 +203,10 @@ def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
     if calendar_name is not None and not isinstance(calendar_name, str):
         raise ProfileConfigError(f"{path}: profile '{name}'.calendar_name must be a string")
 
+    mail_account = raw.get("mail_account")
+    if mail_account is not None and not isinstance(mail_account, str):
+        raise ProfileConfigError(f"{path}: profile '{name}'.mail_account must be a string")
+
     return SourceProfile(
         name=name,
         from_pattern=from_pat,
@@ -168,6 +218,7 @@ def _parse_profile(raw: object, index: int, path: Path) -> SourceProfile:
         mailbox=mailbox or None,
         body_max_chars=raw_body_max,
         calendar_name=calendar_name or None,
+        mail_account=mail_account or None,
     )
 
 

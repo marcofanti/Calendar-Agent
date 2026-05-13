@@ -13,7 +13,7 @@ from calendar_agent.llm import LlmClient, llm_from_env
 from calendar_agent.models import EmailRecord, GolfEvent, RunResult
 from calendar_agent.outlook_calendar import OutlookCalendarClient
 from calendar_agent.parser import ParseAttempt, parse_email
-from calendar_agent.profiles import SourceProfile, match_profile, profiles_from_env
+from calendar_agent.profiles import MailAccount, SourceProfile, match_profile, profiles_config_from_env
 
 
 def run_sync(
@@ -25,6 +25,7 @@ def run_sync(
     llm_client: LlmClient | None = None,
     debug: bool = False,
     profiles: list[SourceProfile] | None = None,
+    accounts: list[MailAccount] | None = None,
     ui=None,  # TerminalUI | None — avoid circular import at module level
 ) -> RunResult:
     result = RunResult()
@@ -32,29 +33,71 @@ def run_sync(
 
     if profiles is None:
         try:
-            profiles = profiles_from_env()
+            profiles, loaded_accounts = profiles_config_from_env()
+            if accounts is None:
+                accounts = loaded_accounts
         except Exception as exc:
             debug_log(f"profile load failed: {exception_summary(exc)}", debug)
             profiles = []
+    if accounts is None:
+        accounts = []
 
-    # Group profiles by mailbox so we do one IMAP SELECT per unique folder.
+    # Build per-account client cache; None key = the default email_client argument.
+    accounts_by_name: dict[str, MailAccount] = {a.name: a for a in accounts}
+    per_account_clients: dict[str | None, object] = {None: email_client}
+
+    def _get_client(account_name: str | None) -> object:
+        if account_name not in per_account_clients:
+            account = accounts_by_name.get(account_name)  # type: ignore[arg-type]
+            if account is None:
+                raise ValueError(
+                    f"Profile references unknown mail_account {account_name!r}; "
+                    "add it to the accounts: section in profiles.yaml"
+                )
+            per_account_clients[account_name] = _build_client_for_account(account, debug=debug)
+        return per_account_clients[account_name]
+
+    # Group by (mail_account, mailbox) so we issue one search per account+folder pair.
     from collections import defaultdict
-    mailbox_groups: dict[str | None, list[str]] = defaultdict(list)
+    groups: dict[tuple[str | None, str | None], list[str]] = defaultdict(list)
     if profiles:
         for p in profiles:
-            mailbox_groups[p.mailbox].append(p.from_search_term)
+            groups[(p.mail_account, p.mailbox)].append(p.from_search_term)
     else:
-        mailbox_groups[None].append("noreply@inclubgolf.com")
+        groups[(None, None)].append("noreply@inclubgolf.com")
 
     seen_uids: set[str] = set()
     emails: list[EmailRecord] = []
-    for mailbox, addrs in mailbox_groups.items():
-        folder_label = f"folder={mailbox!r}" if mailbox else "default folder"
-        debug_log(f"searching {folder_label} for: {', '.join(addrs)}", debug)
-        for e in email_client.search_emails(addrs, folder=mailbox):
+    uid_to_client: dict[str, object] = {}  # maps uid → client, for move_to_trash
+
+    for (account_name, mailbox), addrs in groups.items():
+        try:
+            client = _get_client(account_name)
+        except Exception as exc:
+            result.errors.append(f"account {account_name!r}: {exception_summary(exc)}")
+            continue
+        parts = []
+        if account_name:
+            parts.append(f"account={account_name!r}")
+        if mailbox:
+            parts.append(f"folder={mailbox!r}")
+        debug_log(f"searching {' '.join(parts) or 'default'} for: {', '.join(addrs)}", debug)
+        try:
+            fetched = list(client.search_emails(addrs, folder=mailbox))
+        except Exception as exc:
+            # Auth or connectivity failure for this account — log and continue.
+            # Use debug_log so secondary-account misconfigurations don't surface
+            # as errors that break the summary (run with --debug to investigate).
+            debug_log(
+                f"account {account_name or 'default'}: search failed: {exception_summary(exc)}",
+                debug,
+            )
+            continue
+        for e in fetched:
             if e.uid not in seen_uids:
                 seen_uids.add(e.uid)
                 emails.append(e)
+                uid_to_client[e.uid] = client
 
     result.emails_found = len(emails)
     debug_log(f"mailbox search returned {len(emails)} email(s)", debug)
@@ -62,8 +105,8 @@ def run_sync(
     learning_dir = Path(os.getenv("AGENT_LEARNING_DIR", ".calendar-agent/learned"))
     max_prompt_chars = int(os.getenv("MAX_PROMPT_CHARS", "12000"))
 
-    # Collect (email, attempt, profile, store) for failed parses — used by correction loop.
-    pending: list[tuple[EmailRecord, ParseAttempt, SourceProfile | None, LearningStore | None]] = []
+    # Collect (email, attempt, profile, store, client) for failed parses — correction loop.
+    pending: list[tuple[EmailRecord, ParseAttempt, SourceProfile | None, LearningStore | None, object]] = []
 
     for email in emails:
         debug_log(
@@ -105,13 +148,13 @@ def run_sync(
                 result.errors.append(f"{email.uid}: {reason}")
             else:
                 result.skipped.append(f"{email.uid}: could not parse {email.subject!r}")
-                pending.append((email, attempt, profile, store))
+                pending.append((email, attempt, profile, store, uid_to_client.get(email.uid, email_client)))
             continue
 
         _sync_event(
             event=attempt.event,
             email=email,
-            email_client=email_client,
+            email_client=uid_to_client.get(email.uid, email_client),
             google_client=google_client,
             outlook_client=outlook_client,
             ics_output_dir=ics_output_dir,
@@ -125,7 +168,6 @@ def run_sync(
         _run_corrections(
             pending=pending,
             result=result,
-            email_client=email_client,
             google_client=google_client,
             outlook_client=outlook_client,
             ics_output_dir=ics_output_dir,
@@ -140,7 +182,6 @@ def run_sync(
 def _run_corrections(
     pending,
     result: RunResult,
-    email_client,
     google_client,
     outlook_client,
     ics_output_dir,
@@ -150,13 +191,13 @@ def _run_corrections(
 ) -> None:
     ui.info(f"\n{len(pending)} email(s) failed to parse. Starting correction loop...")
 
-    for email, attempt, profile, store in pending:
-        def sync_fn(event: GolfEvent, _email=email) -> bool:
+    for email, attempt, profile, store, email_client_for_email in pending:
+        def sync_fn(event: GolfEvent, _email=email, _client=email_client_for_email) -> bool:
             try:
                 _sync_event(
                     event=event,
                     email=_email,
-                    email_client=email_client,
+                    email_client=_client,
                     google_client=google_client,
                     outlook_client=outlook_client,
                     ics_output_dir=ics_output_dir,
@@ -268,3 +309,18 @@ def _sync_event(
             summary = exception_summary(exc)
             debug_log(f"email uid={email.uid}: cleanup failed: {summary}", debug)
             result.errors.append(f"{email.uid}: cleanup failed: {summary}")
+
+
+def _build_client_for_account(account: MailAccount, debug: bool = False) -> object:
+    from calendar_agent.email_client import GmailApiEmailClient
+
+    if account.provider == "gmail":
+        return GmailApiEmailClient(
+            debug=debug,
+            credentials_file=account.credentials_file,
+            token_file=account.token_file,
+        )
+    raise ValueError(
+        f"Unsupported provider {account.provider!r} for account {account.name!r}. "
+        "Only 'gmail' is supported in the accounts: section."
+    )

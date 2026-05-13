@@ -202,10 +202,18 @@ class GmailApiConfig:
 
 
 class GmailApiEmailClient:
-    def __init__(self, service=None, debug: bool = False):
+    def __init__(
+        self,
+        service=None,
+        debug: bool = False,
+        credentials_file: str | None = None,
+        token_file: str | None = None,
+    ):
         self.config = GmailApiConfig()
         self.service = service
         self.debug = debug
+        self._credentials_file = credentials_file  # None → read from env GOOGLE_CREDENTIALS_FILE
+        self._token_file = token_file              # None → read from env GOOGLE_TOKEN_FILE
 
     def search_emails(self, from_addresses: list[str], folder: str | None = None) -> list[EmailRecord]:
         service = self._service()
@@ -267,7 +275,12 @@ class GmailApiEmailClient:
         if self.service is None:
             from googleapiclient.discovery import build
 
-            self.service = build("gmail", "v1", credentials=get_google_credentials(GOOGLE_APP_SCOPES))
+            creds = get_google_credentials(
+                GOOGLE_APP_SCOPES,
+                credentials_file=self._credentials_file,
+                token_file=self._token_file,
+            )
+            self.service = build("gmail", "v1", credentials=creds)
         return self.service
 
 

@@ -1,3 +1,9 @@
+accounts:
+  - name: caco
+    provider: gmail
+    credentials_file: caco_credentials.json   # OAuth desktop client JSON for caco.fanti@gmail.com
+    token_file: caco_token.json               # token cache (created on first run, gitignored)
+
 profiles:
   - name: inclubgolf
     from_pattern: "noreply@inclubgolf\\.com"
@@ -86,6 +92,7 @@ profiles:
       - ANY registration confirmation with a date and time is a valid event.
 
   - name: oreilly
+    mail_account: caco
     from_pattern: "reply@et\\.oreilly\\.com"
     subject_pattern: ".*"
     duration_minutes: 60              # fallback; most live events are 1 hour
