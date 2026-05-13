@@ -84,3 +84,41 @@ profiles:
       - Derive start_time and end_time from the time range (e.g. "6:00 PM - 7:30 PM").
       - Keep the event_type exactly as the title appears in the email body.
       - ANY registration confirmation with a date and time is a valid event.
+
+  - name: oreilly
+    from_pattern: "reply@et\\.oreilly\\.com"
+    subject_pattern: ".*"
+    duration_minutes: 60              # fallback; most live events are 1 hour
+    body_max_chars: 600               # date/time is near the top; skip footer boilerplate
+    calendar_name: "O'Reilly Learning"
+    # mailbox: "INBOX"                # change if you filter O'Reilly mail to a label/folder
+    prompt_template: |
+      Today is {today}.
+
+      Extract a live-event calendar entry from this O'Reilly learning email.
+
+      Return one JSON object only:
+      {
+        "is_event": true,
+        "event_type": "course or event title",
+        "status": "Reserved",
+        "location": "",
+        "date": "MM/DD/YYYY",
+        "time": "HH:MM AM/PM",
+        "confidence": number between 0 and 1
+      }
+
+      If the email does not contain a specific date and time for a live event, return:
+      {"is_event": false, "confidence": 0}
+
+      Rules:
+      - event_type: the course or event title. Use the body heading (e.g. "Agentic Coding with Claude Code");
+        strip "HAPPENING SOON:", "presented by ...", and "Hi Marco," prefixes from the subject.
+      - status is always "Reserved" for reminder and confirmation emails.
+      - location: empty string "" (these are online events).
+      - date: convert to MM/DD/YYYY. When only month and day are given (e.g. "May 14"),
+        use today's year unless a different year is clearly stated.
+      - time: when multiple timezones are listed (e.g. "5:00AM PDT / 8:00AM EDT / 12:00PM UTC"),
+        use the EDT time. Format as "HH:MM AM/PM" (e.g. "8:00 AM").
+      - All times are America/New_York (EDT/EST).
+      - Do not invent missing date or time.

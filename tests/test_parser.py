@@ -224,6 +224,51 @@ def test_courtreserve_end_time_overrides_profile_duration():
     assert event.end_time == datetime(2026, 4, 20, 21, 0, tzinfo=ZoneInfo("America/New_York"))
 
 
+def test_oreilly_happening_soon_reminder():
+    profile = SourceProfile(
+        name="oreilly",
+        from_pattern=re.compile(r"reply@et\.oreilly\.com"),
+        subject_pattern=re.compile(".*"),
+        to_pattern=None,
+        body_pattern=None,
+        prompt_template="Extract an O'Reilly live event. Today is {today}.",
+        duration_minutes=60,
+    )
+    llm = _FakeLlm({
+        "is_event": True,
+        "event_type": "Agentic Coding with Claude Code",
+        "status": "Reserved",
+        "location": "",
+        "date": "05/14/2026",
+        "time": "8:00 AM",
+        "confidence": 0.97,
+    })
+    email = EmailRecord(
+        uid="300",
+        message_id="msg-300",
+        subject="HAPPENING SOON: Agentic Coding with Claude Code, presented by Ken Kousen",
+        body=(
+            "Agentic Coding with Claude Code\n"
+            "Hi Marco,\n\n"
+            "This is a reminder that you're registered for Agentic Coding with Claude Code, "
+            "hosted by Ken Kousen. This live course takes place on:\n\n"
+            "May 14 at 5:00AM PDT / 8:00AM EDT / 12:00PM UTC"
+        ),
+        sender="reply@et.oreilly.com",
+    )
+
+    attempt = parse_email(email, llm_client=llm, profile=profile)
+    event = attempt.event
+
+    assert event is not None
+    assert event.event_type == "Agentic Coding with Claude Code"
+    assert event.status == "Reserved"
+    assert event.location == ""
+    assert event.start_time == datetime(2026, 5, 14, 8, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert event.end_time == event.start_time + timedelta(minutes=60)
+    assert "today" not in llm.prompts[0]  # {today} substituted, not passed literally
+
+
 class _FakeLlm:
     def __init__(self, response):
         self.response = response

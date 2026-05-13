@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -298,8 +298,9 @@ def _build_llm_prompt(
 ) -> str:
     candidate = _candidate_for_prompt(deterministic_candidate)
 
+    today_str = date.today().strftime("%B %-d, %Y")  # e.g. "May 13, 2026"
     if profile is not None:
-        base = profile.prompt_template
+        base = profile.prompt_template.replace("{today}", today_str)
     else:
         base = _BUILTIN_PROMPT_TEMPLATE
 
